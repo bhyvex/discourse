@@ -6,8 +6,6 @@ require_dependency "file_helper"
 module FileStore
 
   class S3Store < BaseStore
-    attr_reader :s3_bucket
-
     TOMBSTONE_PREFIX ||= "tombstone/"
 
     def initialize(s3_helper=nil)
@@ -63,7 +61,7 @@ module FileStore
     end
 
     def absolute_base_url
-      bucket = s3_bucket.split("/".freeze, 2).first
+      bucket = @s3_helper.s3_bucket_name
 
       # cf. http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region
       @absolute_base_url ||= if SiteSetting.s3_region == "us-east-1"
@@ -105,12 +103,8 @@ module FileStore
     end
 
     def s3_bucket
-      @s3_bucket ||= begin
-        raise Discourse::SiteSettingMissing.new("s3_upload_bucket") if SiteSetting.s3_upload_bucket.blank?
-        SiteSetting.s3_upload_bucket.downcase
-      end
+      raise Discourse::SiteSettingMissing.new("s3_upload_bucket") if SiteSetting.s3_upload_bucket.blank?
+      SiteSetting.s3_upload_bucket.downcase
     end
-
   end
-
 end
