@@ -15,16 +15,18 @@ addBulkButton('showNotificationLevel', 'notification_level');
 addBulkButton('resetRead', 'reset_read');
 addBulkButton('unlistTopics', 'unlist_topics');
 addBulkButton('showTagTopics', 'change_tags');
+addBulkButton('showAppendTagTopics', 'append_tags');
 
 // Modal for performing bulk actions on topics
-export default Ember.ArrayController.extend(ModalFunctionality, {
+export default Ember.Controller.extend(ModalFunctionality, {
   tags: null,
   buttonRows: null,
 
   emptyTags: Ember.computed.empty('tags'),
+  categoryId: Ember.computed.alias('model.category.id'),
 
   onShow() {
-    this.set('controllers.modal.modalClass', 'topic-bulk-actions-modal small');
+    this.set('modal.modalClass', 'topic-bulk-actions-modal small');
 
     const buttonRows = [];
     let row = [];
@@ -38,14 +40,14 @@ export default Ember.ArrayController.extend(ModalFunctionality, {
     if (row.length) { buttonRows.push(row); }
 
     this.set('buttonRows', buttonRows);
-    this.send('changeBulkTemplate', 'modal/bulk_actions_buttons');
+    this.send('changeBulkTemplate', 'modal/bulk-actions-buttons');
   },
 
   perform(operation) {
     this.set('loading', true);
 
-    const topics = this.get('model');
-    return Discourse.Topic.bulkOperation(this.get('model'), operation).then(result => {
+    const topics = this.get('model.topics');
+    return Discourse.Topic.bulkOperation(topics, operation).then(result => {
       this.set('loading', false);
       if (result && result.topic_ids) {
         return result.topic_ids.map(t => topics.findBy('id', t));
@@ -77,6 +79,9 @@ export default Ember.ArrayController.extend(ModalFunctionality, {
   actions: {
     showTagTopics() {
       this.set('tags', '');
+      this.set('action', 'changeTags');
+      this.set('label', 'change_tags');
+      this.set('title', 'choose_new_tags');
       this.send('changeBulkTemplate', 'bulk-tag');
     },
 
@@ -84,13 +89,25 @@ export default Ember.ArrayController.extend(ModalFunctionality, {
       this.performAndRefresh({type: 'change_tags', tags: this.get('tags')});
     },
 
+    showAppendTagTopics() {
+      this.set('tags', '');
+      this.set('action', 'appendTags');
+      this.set('label', 'append_tags');
+      this.set('title', 'choose_append_tags');
+      this.send('changeBulkTemplate', 'bulk-tag');
+    },
+
+    appendTags() {
+      this.performAndRefresh({type: 'append_tags', tags: this.get('tags')});
+    },
+
     showChangeCategory() {
-      this.send('changeBulkTemplate', 'modal/bulk_change_category');
-      this.set('controllers.modal.modalClass', 'topic-bulk-actions-modal full');
+      this.send('changeBulkTemplate', 'modal/bulk-change-category');
+      this.set('modal.modalClass', 'topic-bulk-actions-modal full');
     },
 
     showNotificationLevel() {
-      this.send('changeBulkTemplate', 'modal/bulk_notification_level');
+      this.send('changeBulkTemplate', 'modal/bulk-notification-level');
     },
 
     deleteTopics() {

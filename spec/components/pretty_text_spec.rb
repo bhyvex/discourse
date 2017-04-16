@@ -10,10 +10,10 @@ describe PrettyText do
 
     describe "off topic quoting" do
       it "can correctly populate topic title" do
-        topic = Fabricate(:topic, title: "this is a test topic")
+        topic = Fabricate(:topic, title: "this is a test topic :slight_smile:")
         expected = <<HTML
 <aside class="quote" data-post="2" data-topic="#{topic.id}"><div class="title">
-<div class="quote-controls"></div><a href="http://test.localhost/t/this-is-a-test-topic/#{topic.id}/2">This is a test topic</a>
+<div class="quote-controls"></div><a href="http://test.localhost/t/this-is-a-test-topic-slight-smile/#{topic.id}/2">This is a test topic <img src="/images/emoji/emoji_one/slight_smile.png?v=3" title="slight_smile" alt="slight_smile" class="emoji"></a>
 </div>
 <blockquote><p>ddd</p></blockquote></aside>
 HTML
@@ -23,23 +23,22 @@ HTML
 
     describe "with avatar" do
       let(:default_avatar) { "//test.localhost/uploads/default/avatars/42d/57c/46ce7ee487/{size}.png" }
+      let(:user) { Fabricate(:user) }
 
       before do
-        eviltrout = User.new
         User.stubs(:default_template).returns(default_avatar)
-        User.expects(:find_by).with(username_lower: "eviltrout").returns(eviltrout)
       end
 
       it "produces a quote even with new lines in it" do
-        expect(PrettyText.cook("[quote=\"EvilTrout, post:123, topic:456, full:true\"]ddd\n[/quote]")).to match_html "<aside class=\"quote\" data-post=\"123\" data-topic=\"456\" data-full=\"true\"><div class=\"title\">\n<div class=\"quote-controls\"></div>\n<img alt='' width=\"20\" height=\"20\" src=\"//test.localhost/uploads/default/avatars/42d/57c/46ce7ee487/40.png\" class=\"avatar\">EvilTrout:</div>\n<blockquote><p>ddd</p></blockquote></aside>"
+        expect(PrettyText.cook("[quote=\"#{user.username}, post:123, topic:456, full:true\"]ddd\n[/quote]")).to match_html "<aside class=\"quote\" data-post=\"123\" data-topic=\"456\" data-full=\"true\"><div class=\"title\">\n<div class=\"quote-controls\"></div>\n<img alt='' width=\"20\" height=\"20\" src=\"//test.localhost/uploads/default/avatars/42d/57c/46ce7ee487/40.png\" class=\"avatar\">#{user.username}:</div>\n<blockquote><p>ddd</p></blockquote></aside>"
       end
 
       it "should produce a quote" do
-        expect(PrettyText.cook("[quote=\"EvilTrout, post:123, topic:456, full:true\"]ddd[/quote]")).to match_html "<aside class=\"quote\" data-post=\"123\" data-topic=\"456\" data-full=\"true\"><div class=\"title\">\n<div class=\"quote-controls\"></div>\n<img alt='' width=\"20\" height=\"20\" src=\"//test.localhost/uploads/default/avatars/42d/57c/46ce7ee487/40.png\" class=\"avatar\">EvilTrout:</div>\n<blockquote><p>ddd</p></blockquote></aside>"
+        expect(PrettyText.cook("[quote=\"#{user.username}, post:123, topic:456, full:true\"]ddd[/quote]")).to match_html "<aside class=\"quote\" data-post=\"123\" data-topic=\"456\" data-full=\"true\"><div class=\"title\">\n<div class=\"quote-controls\"></div>\n<img alt='' width=\"20\" height=\"20\" src=\"//test.localhost/uploads/default/avatars/42d/57c/46ce7ee487/40.png\" class=\"avatar\">#{user.username}:</div>\n<blockquote><p>ddd</p></blockquote></aside>"
       end
 
       it "trims spaces on quote params" do
-        expect(PrettyText.cook("[quote=\"EvilTrout, post:555, topic: 666\"]ddd[/quote]")).to match_html "<aside class=\"quote\" data-post=\"555\" data-topic=\"666\"><div class=\"title\">\n<div class=\"quote-controls\"></div>\n<img alt='' width=\"20\" height=\"20\" src=\"//test.localhost/uploads/default/avatars/42d/57c/46ce7ee487/40.png\" class=\"avatar\">EvilTrout:</div>\n<blockquote><p>ddd</p></blockquote></aside>"
+        expect(PrettyText.cook("[quote=\"#{user.username}, post:555, topic: 666\"]ddd[/quote]")).to match_html "<aside class=\"quote\" data-post=\"555\" data-topic=\"666\"><div class=\"title\">\n<div class=\"quote-controls\"></div>\n<img alt='' width=\"20\" height=\"20\" src=\"//test.localhost/uploads/default/avatars/42d/57c/46ce7ee487/40.png\" class=\"avatar\">#{user.username}:</div>\n<blockquote><p>ddd</p></blockquote></aside>"
       end
 
     end
@@ -77,7 +76,7 @@ HTML
     end
 
     it "should inject nofollow in all user provided links" do
-      expect(PrettyText.cook('<a href="http://cnn.com">cnn</a>')).to match(/nofollow/)
+      expect(PrettyText.cook('<a href="http://cnn.com">cnn</a>')).to match(/nofollow noopener/)
     end
 
     it "should not inject nofollow in all local links" do
@@ -125,12 +124,28 @@ HTML
         expect(PrettyText.excerpt("<img src='http://cnn.com/a.gif'>",100)).to eq("[image]")
       end
 
-      it "should keep alt tags" do
-        expect(PrettyText.excerpt("<img src='http://cnn.com/a.gif' alt='car' title='my big car'>",100)).to eq("[car]")
+      context 'alt tags' do
+        it "should keep alt tags" do
+          expect(PrettyText.excerpt("<img src='http://cnn.com/a.gif' alt='car' title='my big car'>", 100)).to eq("[car]")
+        end
+
+        describe 'when alt tag is empty' do
+          it "should not keep alt tags" do
+            expect(PrettyText.excerpt("<img src='http://cnn.com/a.gif' alt>", 100)).to eq("[#{I18n.t('excerpt_image')}]")
+          end
+        end
       end
 
-      it "should keep title tags" do
-        expect(PrettyText.excerpt("<img src='http://cnn.com/a.gif' title='car'>",100)).to eq("[car]")
+      context 'title tags' do
+        it "should keep title tags" do
+          expect(PrettyText.excerpt("<img src='http://cnn.com/a.gif' title='car'>", 100)).to eq("[car]")
+        end
+
+        describe 'when title tag is empty' do
+          it "should not keep title tags" do
+            expect(PrettyText.excerpt("<img src='http://cnn.com/a.gif' title>", 100)).to eq("[#{I18n.t('excerpt_image')}]")
+          end
+        end
       end
 
       it "should convert images to markdown if the option is set" do
@@ -204,6 +219,10 @@ HTML
       expect(extract_urls("<aside class=\"quote\" data-topic=\"321\">aside</aside>")).to eq(["/t/topic/321"])
     end
 
+    it "should lazyYT videos" do
+      expect(extract_urls("<div class=\"lazyYT\" data-youtube-id=\"yXEuEUQIP3Q\" data-youtube-title=\"Mister Rogers defending PBS to the US Senate\" data-width=\"480\" data-height=\"270\" data-parameters=\"feature=oembed&amp;wmode=opaque\"></div>")).to eq(["https://www.youtube.com/watch?v=yXEuEUQIP3Q"])
+    end
+
     it "should extract links to posts" do
       expect(extract_urls("<aside class=\"quote\" data-topic=\"1234\" data-post=\"4567\">aside</aside>")).to eq(["/t/topic/1234/4567"])
     end
@@ -222,12 +241,11 @@ HTML
         <a href='http://body_and_quote.com'>http://useless2.com</a>
         ")
 
-      expect(links.map{|l| [l.url, l.is_quote]}.to_a.sort).to eq(
-        [["http://body_only.com",false],
-         ["http://body_and_quote.com", false],
-         ["/t/topic/1234",true]
-        ].sort
-      )
+      expect(links.map { |l| [l.url, l.is_quote] }.sort).to eq([
+        ["http://body_only.com", false],
+        ["http://body_and_quote.com", false],
+        ["/t/topic/1234", true],
+      ].sort)
     end
 
     it "should not preserve tags in code blocks" do
@@ -261,9 +279,33 @@ HTML
       expect(PrettyText.excerpt(emoji_image, 100, { keep_emoji_images: true })).to match_html(emoji_image)
     end
 
+    it "should have an option to remap emoji to code points" do
+      emoji_image = "I <img src='/images/emoji/emoji_one/heart.png?v=1' title=':heart:' class='emoji' alt=':heart:'> you <img src='/images/emoji/emoji_one/heart.png?v=1' title=':unknown:' class='emoji' alt=':unknown:'> "
+      expect(PrettyText.excerpt(emoji_image, 100, { remap_emoji: true })).to match_html("I ❤  you :unknown:")
+    end
+
     it "should have an option to preserve emoji codes" do
       emoji_code = "<img src='/images/emoji/emoji_one/heart.png?v=1' title=':heart:' class='emoji' alt=':heart:'>"
       expect(PrettyText.excerpt(emoji_code, 100)).to eq(":heart:")
+    end
+
+    context 'option ot preserve onebox source' do
+      it "should return the right excerpt" do
+        onebox = "<aside class=\"onebox whitelistedgeneric\">\n  <header class=\"source\">\n    <a href=\"https://meta.discourse.org/t/infrequent-translation-updates-in-stable-branch/31213/9\">meta.discourse.org</a>\n  </header>\n  <article class=\"onebox-body\">\n    <img src=\"https://cdn-enterprise.discourse.org/meta/user_avatar/meta.discourse.org/gerhard/200/70381_1.png\" width=\"\" height=\"\" class=\"thumbnail\">\n\n<h3><a href=\"https://meta.discourse.org/t/infrequent-translation-updates-in-stable-branch/31213/9\">Infrequent translation updates in stable branch</a></h3>\n\n<p>Well, there's an Italian translation for \"New Topic\" in beta, it's been there since November 2014 and it works here on meta.     Do you have any plugins installed? Try disabling them. I'm quite confident that it's either a plugin or a site...</p>\n\n  </article>\n  <div class=\"onebox-metadata\">\n    \n    \n  </div>\n  <div style=\"clear: both\"></div>\n</aside>\n\n\n"
+        expected = "<a href=\"https://meta.discourse.org/t/infrequent-translation-updates-in-stable-branch/31213/9\">meta.discourse.org</a>"
+
+        expect(PrettyText.excerpt(onebox, 100, keep_onebox_source: true))
+          .to eq(expected)
+
+        expect(PrettyText.excerpt("#{onebox}\n  \n \n \n\n\n #{onebox}", 100, keep_onebox_source: true))
+          .to eq("#{expected}\n\n#{expected}")
+      end
+
+      it 'should continue to strip quotes' do
+        expect(PrettyText.excerpt(
+          "<aside class='quote'><p>a</p><p>b</p></aside>boom", 100, keep_onebox_source: true
+        )).to eq("boom")
+      end
     end
 
   end
@@ -316,9 +358,9 @@ HTML
     end
 
     it "adds base url to relative links" do
-      html = "<p><a class=\"mention\" href=\"/users/wiseguy\">@wiseguy</a>, <a class=\"mention\" href=\"/users/trollol\">@trollol</a> what do you guys think? </p>"
+      html = "<p><a class=\"mention\" href=\"/u/wiseguy\">@wiseguy</a>, <a class=\"mention\" href=\"/u/trollol\">@trollol</a> what do you guys think? </p>"
       output = described_class.format_for_email(html, post)
-      expect(output).to eq("<p><a class=\"mention\" href=\"#{base_url}/users/wiseguy\">@wiseguy</a>, <a class=\"mention\" href=\"#{base_url}/users/trollol\">@trollol</a> what do you guys think? </p>")
+      expect(output).to eq("<p><a class=\"mention\" href=\"#{base_url}/u/wiseguy\">@wiseguy</a>, <a class=\"mention\" href=\"#{base_url}/u/trollol\">@trollol</a> what do you guys think? </p>")
     end
 
     it "doesn't change external absolute links" do
@@ -424,8 +466,19 @@ HTML
 
   describe "custom emoji" do
     it "replaces the custom emoji" do
-      Emoji.stubs(:custom).returns([ Emoji.create_from_path('trout') ])
+      CustomEmoji.create!(name: 'trout', upload: Fabricate(:upload))
+      Emoji.clear_cache
+
       expect(PrettyText.cook("hello :trout:")).to match(/<img src[^>]+trout[^>]+>/)
+    end
+  end
+
+  describe "censored_pattern site setting" do
+    it "can be cleared if it causes cooking to timeout" do
+      SiteSetting.censored_pattern = "evilregex"
+      described_class.stubs(:markdown).raises(MiniRacer::ScriptTerminatedError)
+      PrettyText.cook("Protect against it plz.") rescue nil
+      expect(SiteSetting.censored_pattern).to be_blank
     end
   end
 

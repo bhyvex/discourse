@@ -94,10 +94,8 @@ class AdminDashboardData
                       :ram_check, :google_oauth2_config_check,
                       :facebook_config_check, :twitter_config_check,
                       :github_config_check, :s3_config_check, :image_magick_check,
-                      :failing_emails_check, :default_logo_check, :contact_email_check,
-                      :send_consumer_email_check, :title_check,
-                      :site_description_check, :site_contact_username_check,
-                      :notification_email_check, :subfolder_ends_in_slash_check,
+                      :failing_emails_check,
+                      :subfolder_ends_in_slash_check,
                       :pop3_polling_configuration, :email_polling_errored_recently
 
     add_problem_check do
@@ -171,7 +169,7 @@ class AdminDashboardData
 
   def sidekiq_check
     last_job_performed_at = Jobs.last_job_performed_at
-    I18n.t('dashboard.sidekiq_warning') if Jobs.queued > 0 and (last_job_performed_at.nil? or last_job_performed_at < 2.minutes.ago)
+    I18n.t('dashboard.sidekiq_warning') if Jobs.queued > 0 && (last_job_performed_at.nil? || last_job_performed_at < 2.minutes.ago)
   end
 
   def queue_size_check
@@ -180,7 +178,7 @@ class AdminDashboardData
   end
 
   def ram_check
-    I18n.t('dashboard.memory_warning') if MemInfo.new.mem_total and MemInfo.new.mem_total < 1_000_000
+    I18n.t('dashboard.memory_warning') if MemInfo.new.mem_total && MemInfo.new.mem_total < 1_000_000
   end
 
   def google_oauth2_config_check
@@ -192,61 +190,28 @@ class AdminDashboardData
   end
 
   def twitter_config_check
-    I18n.t('dashboard.twitter_config_warning') if SiteSetting.enable_twitter_logins and (SiteSetting.twitter_consumer_key.blank? or SiteSetting.twitter_consumer_secret.blank?)
+    I18n.t('dashboard.twitter_config_warning') if SiteSetting.enable_twitter_logins && (SiteSetting.twitter_consumer_key.blank? || SiteSetting.twitter_consumer_secret.blank?)
   end
 
   def github_config_check
-    I18n.t('dashboard.github_config_warning') if SiteSetting.enable_github_logins and (SiteSetting.github_client_id.blank? or SiteSetting.github_client_secret.blank?)
+    I18n.t('dashboard.github_config_warning') if SiteSetting.enable_github_logins && (SiteSetting.github_client_id.blank? || SiteSetting.github_client_secret.blank?)
   end
 
   def s3_config_check
-    bad_keys = (SiteSetting.s3_access_key_id.blank? or SiteSetting.s3_secret_access_key.blank?) and !SiteSetting.s3_use_iam_profile
+    bad_keys = (SiteSetting.s3_access_key_id.blank? || SiteSetting.s3_secret_access_key.blank?) && !SiteSetting.s3_use_iam_profile
 
-    return I18n.t('dashboard.s3_config_warning') if SiteSetting.enable_s3_uploads and (bad_keys or SiteSetting.s3_upload_bucket.blank?)
-    return I18n.t('dashboard.s3_backup_config_warning') if SiteSetting.enable_s3_backups and (bad_keys or SiteSetting.s3_backup_bucket.blank?)
+    return I18n.t('dashboard.s3_config_warning') if SiteSetting.enable_s3_uploads && (bad_keys || SiteSetting.s3_upload_bucket.blank?)
+    return I18n.t('dashboard.s3_backup_config_warning') if SiteSetting.enable_s3_backups && (bad_keys || SiteSetting.s3_backup_bucket.blank?)
     nil
   end
 
   def image_magick_check
-    I18n.t('dashboard.image_magick_warning') if SiteSetting.create_thumbnails and !system("command -v convert >/dev/null;")
+    I18n.t('dashboard.image_magick_warning') if SiteSetting.create_thumbnails && !system("command -v convert >/dev/null;")
   end
 
   def failing_emails_check
     num_failed_jobs = Jobs.num_email_retry_jobs
     I18n.t('dashboard.failing_emails_warning', num_failed_jobs: num_failed_jobs) if num_failed_jobs > 0
-  end
-
-  def default_logo_check
-    if SiteSetting.logo_url =~ /#{SiteSetting.defaults[:logo_url].split('/').last}/ or
-        SiteSetting.logo_small_url =~ /#{SiteSetting.defaults[:logo_small_url].split('/').last}/ or
-        SiteSetting.favicon_url =~ /#{SiteSetting.defaults[:favicon_url].split('/').last}/
-      I18n.t('dashboard.default_logo_warning')
-    end
-  end
-
-  def contact_email_check
-    return I18n.t('dashboard.contact_email_missing') if !SiteSetting.contact_email.present?
-    return I18n.t('dashboard.contact_email_invalid') if !(SiteSetting.contact_email =~ User::EMAIL)
-  end
-
-  def title_check
-    I18n.t('dashboard.title_nag') if SiteSetting.title == SiteSetting.defaults[:title]
-  end
-
-  def site_description_check
-    I18n.t('dashboard.site_description_missing') if !SiteSetting.site_description.present?
-  end
-
-  def send_consumer_email_check
-    I18n.t('dashboard.consumer_email_warning') if Rails.env.production? and ActionMailer::Base.smtp_settings[:address] =~ /gmail\.com|live\.com|yahoo\.com/
-  end
-
-  def site_contact_username_check
-    I18n.t('dashboard.site_contact_username_warning') if !SiteSetting.site_contact_username.present? || SiteSetting.site_contact_username == SiteSetting.defaults[:site_contact_username]
-  end
-
-  def notification_email_check
-    I18n.t('dashboard.notification_email_warning') if !SiteSetting.notification_email.present? || SiteSetting.notification_email == SiteSetting.defaults[:notification_email]
   end
 
   def subfolder_ends_in_slash_check

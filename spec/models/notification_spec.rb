@@ -2,7 +2,7 @@ require 'rails_helper'
 
 describe Notification do
   before do
-    ActiveRecord::Base.observers.enable :all
+    NotificationEmailer.enable
   end
 
   it { is_expected.to validate_presence_of :notification_type }
@@ -133,27 +133,12 @@ describe Notification do
 
       it 'updates the notification count on destroy' do
         Notification.any_instance.expects(:refresh_notification_count).returns(nil)
-        notification.destroy
+        notification.destroy!
       end
 
     end
   end
 
-  describe '@mention' do
-
-    it "calls email_user_mentioned on creating a notification" do
-      UserEmailObserver.any_instance.expects(:after_commit).with(instance_of(Notification))
-      Fabricate(:notification)
-    end
-
-  end
-
-  describe '@mention' do
-    it "calls email_user_quoted on creating a quote notification" do
-      UserEmailObserver.any_instance.expects(:after_commit).with(instance_of(Notification))
-      Fabricate(:quote_notification)
-    end
-  end
 
   describe 'private message' do
     before do
@@ -249,7 +234,8 @@ describe Notification do
   describe 'ensure consistency' do
     it 'deletes notifications if post is missing or deleted' do
 
-      ActiveRecord::Base.observers.disable :all
+      NotificationEmailer.disable
+
       p = Fabricate(:post)
       p2 = Fabricate(:post)
 

@@ -1,5 +1,5 @@
 //= require logster
-//= require ./env
+//= require ./discourse-objects
 //= require probes.js
 
 //= require template_include.js
@@ -18,7 +18,7 @@
 //= require div_resizer
 //= require caret_position
 //= require favcount.js
-//= require jquery.ba-resize.min.js
+//= require jquery.ba-resize.js
 //= require jquery.color.js
 //= require jquery.cookie.js
 //= require jquery.fileupload.js
@@ -37,4 +37,3 @@
 //= require virtual-dom
 //= require virtual-dom-amd
 //= require highlight.js
-//= require_tree ./discourse/ember

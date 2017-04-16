@@ -4,6 +4,12 @@ import sessionFixtures from 'fixtures/session-fixtures';
 import siteFixtures from 'fixtures/site-fixtures';
 import HeaderComponent from 'discourse/components/site-header';
 import { forceMobile, resetMobile } from 'discourse/lib/mobile';
+import { resetPluginApi } from 'discourse/lib/plugin-api';
+import { clearCache as clearOutletCache, resetExtraClasses } from 'discourse/lib/plugin-connectors';
+import { clearHTMLCache } from 'discourse/helpers/custom-html';
+import { flushMap } from 'discourse/models/store';
+import { clearRewrites } from 'discourse/lib/url';
+
 
 function currentUser() {
   return Discourse.User.create(sessionFixtures['/session/current.json'].current_user);
@@ -41,6 +47,7 @@ function acceptance(name, options) {
       // For now don't do scrolling stuff in Test Mode
       HeaderComponent.reopen({examineDockHeader: Ember.K});
 
+      resetExtraClasses();
       const siteJson = siteFixtures['site.json'].site;
       if (options) {
         if (options.setup) {
@@ -64,6 +71,9 @@ function acceptance(name, options) {
         }
       }
 
+      clearOutletCache();
+      clearHTMLCache();
+      resetPluginApi();
       Discourse.reset();
     },
 
@@ -71,9 +81,15 @@ function acceptance(name, options) {
       if (options && options.teardown) {
         options.teardown.call(this);
       }
+      flushMap();
       Discourse.User.resetCurrent();
       Discourse.Site.resetCurrent(Discourse.Site.create(jQuery.extend(true, {}, fixtures['site.json'].site)));
 
+      resetExtraClasses();
+      clearOutletCache();
+      clearHTMLCache();
+      resetPluginApi();
+      clearRewrites();
       Discourse.reset();
     }
   });
@@ -109,6 +125,15 @@ function blank(obj, text) {
   ok(Ember.isEmpty(obj), text);
 }
 
+function waitFor(callback, timeout) {
+  timeout = timeout || 500;
+  stop();
+  Ember.run.later(() => {
+    callback();
+    start();
+  }, timeout);
+}
+
 export { acceptance,
          controllerFor,
          asyncTestDiscourse,
@@ -116,4 +141,5 @@ export { acceptance,
          logIn,
          currentUser,
          blank,
-         present };
+         present,
+         waitFor };

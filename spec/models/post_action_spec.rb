@@ -199,10 +199,6 @@ describe PostAction do
       expect { bookmark.save; post.reload }.to change(post, :bookmark_count).by(1)
     end
 
-    it "increases the forum topic's bookmark count when saved" do
-      expect { bookmark.save; post.topic.reload }.to change(post.topic, :bookmark_count).by(1)
-    end
-
     describe 'when deleted' do
 
       before do
@@ -218,16 +214,15 @@ describe PostAction do
         expect { post.reload }.to change(post, :bookmark_count).by(-1)
       end
 
-      it 'reduces the bookmark count of the forum topic' do
-        expect { @topic.reload }.to change(post.topic, :bookmark_count).by(-1)
-      end
     end
   end
 
   describe 'when a user likes something' do
 
     it 'should generate notifications correctly' do
-      ActiveRecord::Base.observers.enable :all
+
+      PostActionNotifier.enable
+
       PostAction.act(codinghorror, post, PostActionType.types[:like])
       expect(Notification.count).to eq(1)
 
@@ -291,19 +286,24 @@ describe PostAction do
     end
   end
 
-  describe 'when a user votes for something' do
-    it 'should increase the vote counts when a user votes' do
+  describe 'when a user likes something' do
+    it 'should increase the like counts when a user votes' do
       expect {
-        PostAction.act(codinghorror, post, PostActionType.types[:vote])
+        PostAction.act(codinghorror, post, PostActionType.types[:like])
         post.reload
-      }.to change(post, :vote_count).by(1)
+      }.to change(post, :like_count).by(1)
     end
 
     it 'should increase the forum topic vote count when a user votes' do
       expect {
-        PostAction.act(codinghorror, post, PostActionType.types[:vote])
+        PostAction.act(codinghorror, post, PostActionType.types[:like])
         post.topic.reload
-      }.to change(post.topic, :vote_count).by(1)
+      }.to change(post.topic, :like_count).by(1)
+
+      expect {
+        PostAction.remove_act(codinghorror, post, PostActionType.types[:like])
+        post.topic.reload
+      }.to change(post.topic, :like_count).by(-1)
     end
   end
 
@@ -447,11 +447,11 @@ describe PostAction do
       expect(post.hidden).to eq(false)
     end
 
-    it "will automatically close a topic due to large community flagging" do
-      SiteSetting.stubs(:flags_required_to_hide_post).returns(0)
-
-      SiteSetting.stubs(:num_flags_to_close_topic).returns(3)
-      SiteSetting.stubs(:num_flaggers_to_close_topic).returns(2)
+    it "will automatically pause a topic due to large community flagging" do
+      SiteSetting.flags_required_to_hide_post = 0
+      SiteSetting.num_flags_to_close_topic = 3
+      SiteSetting.num_flaggers_to_close_topic = 2
+      SiteSetting.num_hours_to_close_topic = 1
 
       topic = Fabricate(:topic)
       post1 = create_post(topic: topic)
@@ -490,6 +490,11 @@ describe PostAction do
 
       expect(topic.reload.closed).to eq(true)
 
+      topic_status_update = TopicStatusUpdate.last
+
+      expect(topic_status_update.topic).to eq(topic)
+      expect(topic_status_update.execute_at).to be_within(1.second).of(1.hour.from_now)
+      expect(topic_status_update.status_type).to eq(TopicStatusUpdate.types[:open])
     end
 
   end

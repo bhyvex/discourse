@@ -1,4 +1,6 @@
 require_dependency 'discourse_tagging'
+require_dependency 'wizard'
+require_dependency 'wizard/builder'
 
 class SiteSerializer < ApplicationSerializer
 
@@ -20,12 +22,26 @@ class SiteSerializer < ApplicationSerializer
              :can_create_tag,
              :can_tag_topics,
              :tags_filter_regexp,
-             :top_tags
+             :top_tags,
+             :wizard_required,
+             :topic_featured_link_allowed_category_ids,
+             :user_themes
 
   has_many :categories, serializer: BasicCategorySerializer, embed: :objects
   has_many :trust_levels, embed: :objects
   has_many :archetypes, embed: :objects, serializer: ArchetypeSerializer
   has_many :user_fields, embed: :objects, serialzer: UserFieldSerializer
+
+  def user_themes
+    cache_fragment("user_themes") do
+      Theme.where('key = :default OR user_selectable',
+                    default: SiteSetting.default_theme_key)
+           .order(:name)
+           .pluck(:key, :name)
+           .map{|k,n| {theme_key: k, name: n, default: k == SiteSetting.default_theme_key}}
+           .as_json
+    end
+  end
 
   def groups
     cache_fragment("group_names") do
@@ -108,6 +124,22 @@ class SiteSerializer < ApplicationSerializer
   end
 
   def top_tags
-    Tag.top_tags
+    Tag.top_tags(guardian: scope)
+  end
+
+  def wizard_required
+    true
+  end
+
+  def include_wizard_required?
+    Wizard.user_requires_completion?(scope.user)
+  end
+
+  def include_topic_featured_link_allowed_category_ids?
+    SiteSetting.topic_featured_link_enabled
+  end
+
+  def topic_featured_link_allowed_category_ids
+    scope.topic_featured_link_allowed_category_ids
   end
 end

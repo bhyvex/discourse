@@ -92,6 +92,17 @@ class PostCreator
       return false
     end
 
+    # Make sure none of the users have muted the creator
+    names = @opts[:target_usernames]
+    if names.present? && !skip_validations? && !@user.staff?
+      users = User.where(username: names.split(',').flatten).pluck(:id, :username).to_h
+
+      MutedUser.where(user_id: users.keys, muted_user_id: @user.id).pluck(:user_id).each do |m|
+        errors[:base] << I18n.t(:not_accepting_pms, username: users[m])
+      end
+      return false if errors[:base].present?
+    end
+
     if new_topic?
       topic_creator = TopicCreator.new(@user, guardian, @opts)
       return false unless skip_validations? || validate_child(topic_creator)
@@ -146,6 +157,9 @@ class PostCreator
     end
 
     if @post && errors.blank?
+      # update counters etc.
+      @post.topic.reload
+
       publish
 
       track_latest_on_category
@@ -168,7 +182,7 @@ class PostCreator
     create
 
     if !self.errors.full_messages.empty?
-      raise ActiveRecord::RecordNotSaved.new("Failed to create post", self)
+      raise ActiveRecord::RecordNotSaved.new("Failed to create post: #{self.errors.full_messages}")
     end
 
     @post
@@ -199,7 +213,9 @@ class PostCreator
     set_reply_info(post)
 
     post.word_count = post.raw.scan(/[[:word:]]+/).size
-    post.post_number ||= Topic.next_post_number(post.topic_id, post.reply_to_post_number.present?)
+
+    whisper = post.post_type == Post.types[:whisper]
+    post.post_number ||= Topic.next_post_number(post.topic_id, post.reply_to_post_number.present?, whisper)
 
     cooking_options = post.cooking_options || {}
     cooking_options[:topic_id] = post.topic_id
@@ -333,6 +349,18 @@ class PostCreator
 
   private
 
+  # TODO: merge the similar function in TopicCreator and fix parameter naming for `category`
+  def find_category_id
+    @opts.delete(:category) if @opts[:archetype].present? && @opts[:archetype] == Archetype.private_message
+
+    category = if (@opts[:category].is_a? Integer) || (@opts[:category] =~ /^\d+$/)
+                 Category.find_by(id: @opts[:category])
+               else
+                 Category.find_by(name_lower: @opts[:category].try(:downcase))
+               end
+    category&.id
+  end
+
   def create_topic
     return if @topic
     begin
@@ -343,6 +371,9 @@ class PostCreator
     end
     @post.topic_id = @topic.id
     @post.topic = @topic
+    if @topic && @topic.category && @topic.category.all_topics_wiki
+      @post.wiki = true
+    end
   end
 
   def update_topic_stats
@@ -359,8 +390,16 @@ class PostCreator
   end
 
   def update_topic_auto_close
-    if @topic.auto_close_based_on_last_post && @topic.auto_close_hours
-      @topic.set_auto_close(@topic.auto_close_hours).save
+    topic_status_update = @topic.topic_status_update
+
+    if topic_status_update &&
+       topic_status_update.based_on_last_post &&
+       topic_status_update.duration > 0
+
+      @topic.set_or_create_status_update(TopicStatusUpdate.types[:close],
+        topic_status_update.duration,
+        based_on_last_post: topic_status_update.based_on_last_post
+      )
     end
   end
 
@@ -452,9 +491,11 @@ class PostCreator
     end
 
     if @user.staged
-      TopicUser.auto_watch(@user.id, @topic.id)
+      TopicUser.auto_notification_for_staging(@user.id, @topic.id, TopicUser.notification_reasons[:auto_watch])
+    elsif @user.user_option.notification_level_when_replying === NotificationLevels.topic_levels[:watching]
+      TopicUser.auto_notification(@user.id, @topic.id, TopicUser.notification_reasons[:created_post], NotificationLevels.topic_levels[:watching])
     else
-      TopicUser.auto_track(@user.id, @topic.id, TopicUser.notification_reasons[:created_post])
+      TopicUser.auto_notification(@user.id, @topic.id, TopicUser.notification_reasons[:created_post], NotificationLevels.topic_levels[:tracking])
     end
   end
 

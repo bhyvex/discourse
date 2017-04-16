@@ -8,7 +8,7 @@ class PostAlerter
 
   def not_allowed?(user, post)
     user.blank? ||
-    user.id == Discourse::SYSTEM_USER_ID ||
+    user.id < 0 ||
     user.id == post.user_id
   end
 
@@ -269,7 +269,7 @@ class PostAlerter
 
   def create_notification(user, type, post, opts=nil)
     return if user.blank?
-    return if user.id == Discourse::SYSTEM_USER_ID
+    return if user.id < 0
 
     return if type == Notification.types[:liked] && user.user_option.like_notification_frequency == UserOption.like_notification_frequency_type[:never]
 
@@ -343,7 +343,7 @@ class PostAlerter
       end
     end
 
-    UserActionObserver.log_notification(original_post, user, type, opts[:acting_user_id])
+    UserActionCreator.log_notification(original_post, user, type, opts[:acting_user_id])
 
     topic_title = post.topic.title
     # when sending a private message email, keep the original title
@@ -373,7 +373,7 @@ class PostAlerter
                               post_action_id: opts[:post_action_id],
                               data: notification_data.to_json)
 
-   if !existing_notification && NOTIFIABLE_TYPES.include?(type)
+   if !existing_notification && NOTIFIABLE_TYPES.include?(type) && !user.suspended?
      # we may have an invalid post somehow, dont blow up
      post_url = original_post.url rescue nil
      if post_url
@@ -382,7 +382,7 @@ class PostAlerter
           post_number: original_post.post_number,
           topic_title: original_post.topic.title,
           topic_id: original_post.topic.id,
-          excerpt: original_post.excerpt(400, text_entities: true, strip_links: true),
+          excerpt: original_post.excerpt(400, text_entities: true, strip_links: true, remap_emoji: true),
           username: original_username,
           post_url: post_url
         }
@@ -396,9 +396,9 @@ class PostAlerter
   end
 
   def push_notification(user, payload)
-    if SiteSetting.allow_push_user_api_keys && SiteSetting.allowed_user_api_push_urls.present?
+    if SiteSetting.allow_user_api_key_scopes.split("|").include?("push") && SiteSetting.allowed_user_api_push_urls.present?
       clients = user.user_api_keys
-          .where('push AND push_url IS NOT NULL AND position(push_url in ?) > 0 AND revoked_at IS NULL',
+          .where("('push' = ANY(scopes) OR 'notifications' = ANY(scopes)) AND push_url IS NOT NULL AND position(push_url in ?) > 0 AND revoked_at IS NULL",
                   SiteSetting.allowed_user_api_push_urls)
           .pluck(:client_id, :push_url)
 

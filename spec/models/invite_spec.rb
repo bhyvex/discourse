@@ -102,8 +102,15 @@ describe Invite do
             expect(topic.invite_by_email(inviter, 'ICEKING@adventuretime.ooo')).to eq(@invite)
           end
 
+          it 'updates timestamp of existing invite' do
+            @invite.created_at = 10.days.ago
+            @invite.save
+            resend_invite = topic.invite_by_email(inviter, 'iceking@adventuretime.ooo')
+            expect(resend_invite.created_at).to be_within(1.minute).of(Time.zone.now)
+          end
+
           it 'returns a new invite if the other has expired' do
-            SiteSetting.stubs(:invite_expiry_days).returns(1)
+            SiteSetting.invite_expiry_days = 1
             @invite.created_at = 2.days.ago
             @invite.save
             new_invite = topic.invite_by_email(inviter, 'iceking@adventuretime.ooo')
@@ -152,11 +159,10 @@ describe Invite do
   context 'an existing user' do
     let(:topic) { Fabricate(:topic, category_id: nil, archetype: 'private_message') }
     let(:coding_horror) { Fabricate(:coding_horror) }
-    let!(:invite) { topic.invite_by_email(topic.user, coding_horror.email) }
 
     it "works" do
       # doesn't create an invite
-      expect(invite).to be_blank
+      expect { topic.invite_by_email(topic.user, coding_horror.email) }.to raise_error(StandardError)
 
       # gives the user permission to access the topic
       expect(topic.allowed_users.include?(coding_horror)).to eq(true)
@@ -222,7 +228,7 @@ describe Invite do
       end
 
       it 'does not enqueue an email if the user has already set password' do
-        user = Fabricate(:user, email: invite.email, password_hash: "7af7805c9ee3697ed1a83d5e3cb5a3a431d140933a87fdcdc5a42aeef9337f81")
+        Fabricate(:user, email: invite.email, password_hash: "7af7805c9ee3697ed1a83d5e3cb5a3a431d140933a87fdcdc5a42aeef9337f81")
         Jobs.expects(:enqueue).with(:invite_password_instructions_email, has_key(:username)).never
         invite.redeem
       end
@@ -232,6 +238,25 @@ describe Invite do
         invite.redeem
       end
 
+    end
+
+    context "as a moderator" do
+      it "will give the user a moderator flag" do
+        invite.invited_by = Fabricate(:admin)
+        invite.moderator = true
+        invite.save
+
+        user = invite.redeem
+        expect(user).to be_moderator
+      end
+
+      it "will not give the user a moderator flag if the inviter is not staff" do
+        invite.moderator = true
+        invite.save
+
+        user = invite.redeem
+        expect(user).not_to be_moderator
+      end
     end
 
     context "when inviting to groups" do
@@ -254,6 +279,7 @@ describe Invite do
 
     context 'inviting when must_approve_users? is enabled' do
       it 'correctly activates accounts' do
+        invite.invited_by = Fabricate(:admin)
         SiteSetting.stubs(:must_approve_users).returns(true)
         user = invite.redeem
         expect(user.approved?).to eq(true)
@@ -311,25 +337,24 @@ describe Invite do
     end
 
     context 'invited to topics' do
-      let!(:topic) { Fabricate(:private_message_topic) }
+      let(:tl2_user) { Fabricate(:user, trust_level: 2) }
+      let!(:topic) { Fabricate(:private_message_topic, user: tl2_user) }
       let!(:invite) {
         topic.invite(topic.user, 'jake@adventuretime.ooo')
       }
 
       context 'redeem topic invite' do
-
         it 'adds the user to the topic_users' do
           user = invite.redeem
           topic.reload
           expect(topic.allowed_users.include?(user)).to eq(true)
           expect(Guardian.new(user).can_see?(topic)).to eq(true)
         end
-
       end
 
       context 'invited by another user to the same topic' do
-        let(:coding_horror) { User.find_by(username: "CodingHorror") }
-        let!(:another_invite) { topic.invite(coding_horror, 'jake@adventuretime.ooo') }
+        let(:another_tl2_user) { Fabricate(:user, trust_level: 2) }
+        let!(:another_invite) { topic.invite(another_tl2_user, 'jake@adventuretime.ooo') }
         let!(:user) { invite.redeem }
 
         it 'adds the user to the topic_users' do
@@ -339,25 +364,14 @@ describe Invite do
       end
 
       context 'invited by another user to a different topic' do
-        let!(:another_invite) { another_topic.invite(coding_horror, 'jake@adventuretime.ooo') }
         let!(:user) { invite.redeem }
-
-        let(:coding_horror) { User.find_by(username: "CodingHorror") }
-        let(:another_topic) { Fabricate(:topic, category_id: nil, archetype: "private_message", user: coding_horror) }
+        let(:another_tl2_user) { Fabricate(:user, trust_level: 2) }
+        let(:another_topic) { Fabricate(:topic, user: another_tl2_user) }
 
         it 'adds the user to the topic_users of the first topic' do
+          expect(another_topic.invite(another_tl2_user, user.username)).to be_truthy # invited via username
           expect(topic.allowed_users.include?(user)).to eq(true)
           expect(another_topic.allowed_users.include?(user)).to eq(true)
-          duplicate_invite = Invite.find_by(id: another_invite.id)
-          expect(duplicate_invite).to be_nil
-        end
-
-        context 'if they redeem the other invite afterwards' do
-
-          it 'wont redeem a duplicate invite' do
-            expect(another_invite.redeem).to be_blank
-          end
-
         end
       end
     end
@@ -465,13 +479,13 @@ describe Invite do
     let(:user) { Fabricate(:user, email: invite.email) }
 
     it 'redeems the invite from email' do
-      result = Invite.redeem_from_email(user.email)
+      Invite.redeem_from_email(user.email)
       invite.reload
       expect(invite).to be_redeemed
     end
 
     it 'does not redeem the invite if email does not match' do
-      result = Invite.redeem_from_email('test24@example.com')
+      Invite.redeem_from_email('test24@example.com')
       invite.reload
       expect(invite).not_to be_redeemed
     end
@@ -484,13 +498,13 @@ describe Invite do
     let(:user) { Fabricate(:user, email: invite.email) }
 
     it 'redeems the invite from token' do
-      result = Invite.redeem_from_token(invite.invite_key, user.email)
+      Invite.redeem_from_token(invite.invite_key, user.email)
       invite.reload
       expect(invite).to be_redeemed
     end
 
     it 'does not redeem the invite if token does not match' do
-      result = Invite.redeem_from_token("bae0071f995bb4b6f756e80b383778b5", user.email)
+      Invite.redeem_from_token("bae0071f995bb4b6f756e80b383778b5", user.email)
       invite.reload
       expect(invite).not_to be_redeemed
     end

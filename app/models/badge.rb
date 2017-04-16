@@ -1,6 +1,13 @@
+require_dependency 'slug'
+
 class Badge < ActiveRecord::Base
   # NOTE: These badge ids are not in order! They are grouped logically.
   #       When picking an id, *search* for it.
+
+  BasicUser = 1
+  Member = 2
+  Regular = 3
+  Leader = 4
 
   Welcome = 5
   NicePost = 6
@@ -48,6 +55,8 @@ class Badge < ActiveRecord::Base
   ThankYou = 38
   GivesBack = 32
   Empathetic = 39
+
+  NewUserOfTheMonth = 44
 
   # other consts
   AutobiographerMinBioLength = 10
@@ -98,7 +107,7 @@ class Badge < ActiveRecord::Base
   # fields that can not be edited on system badges
   def self.protected_system_fields
     [
-      :badge_type_id, :multiple_grant,
+      :name, :badge_type_id, :multiple_grant,
       :target_posts, :show_posts, :query,
       :trigger, :auto_revoke, :listable
     ]
@@ -119,6 +128,22 @@ class Badge < ActiveRecord::Base
     }
   end
 
+  def self.ensure_consistency!
+    exec_sql <<-SQL.squish
+      DELETE FROM user_badges
+            USING user_badges ub
+       LEFT JOIN users u ON u.id = ub.user_id
+           WHERE u.id IS NULL
+           AND user_badges.id = ub.id
+    SQL
+
+    Badge.find_each(&:reset_grant_count!)
+  end
+
+  def awarded_for_trust_level?
+    id <= 4
+  end
+
   def reset_grant_count!
     self.grant_count = UserBadge.where(badge_id: id).count
     save!
@@ -129,12 +154,10 @@ class Badge < ActiveRecord::Base
   end
 
   def default_icon=(val)
-    self.icon ||= val
-    self.icon = val if self.icon = "fa-certificate"
-  end
-
-  def default_name=(val)
-    self.name ||= val
+    unless self.image
+      self.icon ||= val
+      self.icon = val if self.icon == "fa-certificate"
+    end
   end
 
   def default_allow_title=(val)
@@ -148,17 +171,6 @@ class Badge < ActiveRecord::Base
     end
   end
 
-  def self.ensure_consistency!
-    exec_sql <<SQL
-    DELETE FROM user_badges
-    USING user_badges ub
-    LEFT JOIN users u ON u.id = ub.user_id
-    WHERE u.id IS NULL AND user_badges.id = ub.id
-SQL
-
-    Badge.find_each(&:reset_grant_count!)
-  end
-
   def display_name
     key = "badges.#{i18n_name}.name"
     I18n.t(key, default: self.name)
@@ -170,10 +182,7 @@ SQL
   end
 
   def long_description=(val)
-    if val != long_description
-      self[:long_description] = val
-    end
-
+    self[:long_description] = val if val != long_description
     val
   end
 
@@ -183,10 +192,7 @@ SQL
   end
 
   def description=(val)
-    if val != description
-      self[:description] = val
-    end
-
+    self[:description] = val if val != description
     val
   end
 
@@ -197,15 +203,14 @@ SQL
 
   protected
 
-  def ensure_not_system
-    unless id
-      self.id = [Badge.maximum(:id) + 1, 100].max
+    def ensure_not_system
+      self.id = [Badge.maximum(:id) + 1, 100].max unless id
     end
-  end
 
-  def i18n_name
-    self.name.downcase.tr(' ', '_')
-  end
+    def i18n_name
+      self.name.downcase.tr(' ', '_')
+    end
+
 end
 
 # == Schema Information

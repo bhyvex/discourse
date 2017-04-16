@@ -45,12 +45,12 @@ module PrettyText
     end
 
     def get_topic_info(topic_id)
-      return unless Fixnum === topic_id
+      return unless topic_id.is_a?(Integer)
       # TODO this only handles public topics, secured one do not get this
       topic = Topic.find_by(id: topic_id)
       if topic && Guardian.new.can_see?(topic)
         {
-          title: topic.title,
+          title: Rack::Utils.escape_html(topic.title),
           href: topic.url
         }
       end
@@ -76,4 +76,3 @@ module PrettyText
     end
   end
 end
-

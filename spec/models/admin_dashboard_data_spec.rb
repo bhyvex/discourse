@@ -123,77 +123,6 @@ describe AdminDashboardData do
     end
   end
 
-  describe 'send_consumer_email_check' do
-    subject { described_class.new.send_consumer_email_check }
-
-    it 'returns nil if gmail.com is not in the smtp_settings address' do
-      ActionMailer::Base.stubs(:smtp_settings).returns({address: 'mandrillapp.com'})
-      expect(subject).to be_nil
-    end
-
-    context 'gmail.com is in the smtp_settings address' do
-      before { ActionMailer::Base.stubs(:smtp_settings).returns({address: 'smtp.gmail.com'}) }
-
-      it 'returns nil in development env' do
-        Rails.stubs(env: ActiveSupport::StringInquirer.new('development'))
-        expect(subject).to be_nil
-      end
-
-      it 'returns a string when in production env' do
-        Rails.stubs(env: ActiveSupport::StringInquirer.new('production'))
-        expect(subject).not_to be_nil
-      end
-    end
-  end
-
-  describe 'default_logo_check' do
-    subject { described_class.new.default_logo_check }
-
-    describe 'favicon_url check' do
-      before do
-        SiteSetting.logo_url = '/assets/my-logo.jpg'
-        SiteSetting.logo_small_url = '/assets/my-small-logo.jpg'
-      end
-
-      it 'returns a string when favicon_url is default' do
-        expect(subject).not_to be_nil
-      end
-
-      it 'returns a string when favicon_url contains default filename' do
-        SiteSetting.favicon_url = "/prefix#{SiteSetting.defaults[:favicon_url]}"
-        expect(subject).not_to be_nil
-      end
-
-      it 'returns nil when favicon_url does not match default-favicon.png' do
-        SiteSetting.favicon_url = '/assets/my-favicon.png'
-        expect(subject).to be_nil
-      end
-    end
-
-    describe 'logo_url check' do
-      before do
-        SiteSetting.favicon_url = '/assets/my-favicon.png'
-        SiteSetting.logo_small_url = '/assets/my-small-logo.jpg'
-      end
-
-      it 'returns a string when logo_url is default' do
-        expect(subject).not_to be_nil
-      end
-
-      it 'returns a string when logo_url contains default filename' do
-        SiteSetting.logo_url = "/prefix#{SiteSetting.defaults[:logo_url]}"
-        expect(subject).not_to be_nil
-      end
-
-      it 'returns nil when logo_url does not match d-logo-sketch.png' do
-        SiteSetting.logo_url = '/assets/my-logo.png'
-        expect(subject).to be_nil
-      end
-    end
-
-    # etc.
-  end
-
   describe 'auth_config_checks' do
 
     shared_examples 'problem detection for login providers' do
@@ -209,7 +138,7 @@ describe AdminDashboardData do
           SiteSetting.stubs(enable_setting).returns(true)
         end
 
-        it 'returns nil key and secret are set' do
+        it 'returns nil when key and secret are set' do
           SiteSetting.stubs(key).returns('12313213')
           SiteSetting.stubs(secret).returns('12312313123')
           expect(subject).to be_nil
@@ -257,6 +186,98 @@ describe AdminDashboardData do
       let(:key) { :github_client_id }
       let(:secret) { :github_client_secret }
       include_examples 'problem detection for login providers'
+    end
+  end
+
+  describe 's3_config_check' do
+    shared_examples 'problem detection for s3-dependent setting' do
+      subject { described_class.new.s3_config_check }
+      let(:access_keys) { [:s3_access_key_id, :s3_secret_access_key] }
+      let(:all_cred_keys) { access_keys + [:s3_use_iam_profile] }
+      let(:all_setting_keys) { all_cred_keys + [bucket_key] }
+
+      def all_setting_permutations(keys)
+        ['a', ''].repeated_permutation(keys.size) do |*values|
+          hash = Hash[keys.zip(values)]
+          hash.each do |key,value|
+            SiteSetting.stubs(key).returns(value)
+          end
+          yield hash
+        end
+      end
+
+      context 'when setting is enabled' do
+        let(:setting_enabled) { true }
+        before do
+          SiteSetting.stubs(setting_key).returns(setting_enabled)
+          SiteSetting.stubs(bucket_key).returns(bucket_value)
+        end
+
+        context 'when bucket is blank' do
+          let(:bucket_value) { '' }
+
+          it "always returns a string" do
+            all_setting_permutations(all_cred_keys) do
+              expect(subject).to_not be_nil
+            end
+          end
+        end
+
+        context 'when bucket is filled in' do
+          let(:bucket_value) { 'a' }
+          before do
+            SiteSetting.stubs(:s3_use_iam_profile).returns(use_iam_profile)
+          end
+
+          context 'when using iam profile' do
+            let(:use_iam_profile) { true }
+
+            it 'always returns nil' do
+              all_setting_permutations(access_keys) do
+                expect(subject).to be_nil
+              end
+            end
+          end
+
+          context 'when not using iam profile' do
+            let(:use_iam_profile) { false }
+
+            it 'returns nil only if both access key fields are filled in' do
+              all_setting_permutations(access_keys) do |settings|
+                if settings.values.all?
+                  expect(subject).to be_nil
+                else
+                  expect(subject).to_not be_nil
+                end
+              end
+            end
+          end
+        end
+      end
+
+      context 'when setting is not enabled' do
+        before do
+          SiteSetting.stubs(setting_key).returns(false)
+        end
+
+        it "always returns nil" do
+          all_setting_permutations(all_setting_keys) do
+            expect(subject).to be_nil
+          end
+        end
+      end
+    end
+
+    describe 'uploads' do
+      let(:setting_key) { :enable_s3_uploads }
+      let(:bucket_key) { :s3_upload_bucket }
+      include_examples 'problem detection for s3-dependent setting'
+    end
+
+    describe 'backups' do
+      let(:setting_key) { :enable_s3_backups }
+      let(:bucket_key) { :s3_backup_bucket }
+      include_examples 'problem detection for s3-dependent setting'
     end
   end
 

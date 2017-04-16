@@ -6,6 +6,8 @@ import OpenComposer from "discourse/mixins/open-composer";
 import Category from 'discourse/models/category';
 import mobile from 'discourse/lib/mobile';
 import { findAll } from 'discourse/models/login-method';
+import { getOwner } from 'discourse-common/lib/get-owner';
+import { userPath } from 'discourse/lib/url';
 
 function unlessReadOnly(method, message) {
   return function() {
@@ -20,22 +22,9 @@ function unlessReadOnly(method, message) {
 const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
   siteTitle: setting('title'),
 
-  _handleLogout() {
-    if (this.currentUser) {
-      this.currentUser.destroySession().then(() => logout(this.siteSettings, this.keyValueStore));
-    }
-  },
-
   actions: {
-
-    showSearchHelp() {
-      ajax("/static/search_help.html", { dataType: 'html' }).then(model => {
-        showModal('searchHelp', { model });
-      });
-    },
-
     toggleAnonymous() {
-      ajax("/users/toggle-anon", {method: 'POST'}).then(() => {
+      ajax(userPath("toggle-anon"), {method: 'POST'}).then(() => {
         window.location.reload();
       });
     },
@@ -53,13 +42,9 @@ const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
 
     // Ember doesn't provider a router `willTransition` event so let's make one
     willTransition() {
-      var router = this.container.lookup('router:main');
+      var router = getOwner(this).lookup('router:main');
       Ember.run.once(router, router.trigger, 'willTransition');
       return this._super();
-    },
-
-    showTopicEntrance(data) {
-      this.controllerFor('topic-entrance').send('show', data);
     },
 
     postWasEnqueued(details) {
@@ -143,12 +128,12 @@ const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
     },
 
     editCategory(category) {
-      Category.reloadById(category.get('id')).then((atts) => {
+      Category.reloadById(category.get('id')).then(atts => {
         const model = this.store.createRecord('category', atts.category);
         model.setupGroupsAndPermissions();
         this.site.updateCategory(model);
-        showModal('editCategory', { model });
-        this.controllerFor('editCategory').set('selectedTab', 'general');
+        showModal('edit-category', { model });
+        this.controllerFor('edit-category').set('selectedTab', 'general');
       });
     },
 
@@ -162,10 +147,9 @@ const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
     },
 
     changeBulkTemplate(w) {
-      const controllerName = w.replace('modal/', ''),
-            factory = this.container.lookupFactory('controller:' + controllerName);
-
-      this.render(w, {into: 'modal/topic-bulk-actions', outlet: 'bulkOutlet', controller: factory ? controllerName : 'topic-bulk-actions'});
+      const controllerName = w.replace('modal/', '');
+      const controller = getOwner(this).lookup('controller:' + controllerName);
+      this.render(w, {into: 'modal/topic-bulk-actions', outlet: 'bulkOutlet', controller: controller ? controllerName : 'topic-bulk-actions'});
     },
 
     createNewTopicViaParams(title, body, category_id, category, tags) {
@@ -183,6 +167,13 @@ const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
       // Support for callbacks once the application has activated
       ApplicationRoute.trigger('activate');
     });
+  },
+
+  renderTemplate() {
+    this.render('application');
+    this.render('user-card', { into: 'application', outlet: 'user-card' });
+    this.render('modal', { into: 'application', outlet: 'modal' });
+    this.render('composer', { into: 'application', outlet: 'composer' });
   },
 
   handleShowLogin() {
@@ -204,9 +195,8 @@ const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
   },
 
   _autoLogin(modal, modalClass, notAuto) {
-
     const methods = findAll(this.siteSettings,
-                            this.container.lookup('capabilities:main'),
+                            getOwner(this).lookup('capabilities:main'),
                             this.site.isMobileDevice);
 
     if (!this.siteSettings.enable_local_logins && methods.length === 1) {
@@ -218,6 +208,11 @@ const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
     }
   },
 
+  _handleLogout() {
+    if (this.currentUser) {
+      this.currentUser.destroySession().then(() => logout(this.siteSettings, this.keyValueStore));
+    }
+  },
 });
 
 RSVP.EventTarget.mixin(ApplicationRoute);

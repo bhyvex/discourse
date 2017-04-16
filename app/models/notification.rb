@@ -12,8 +12,11 @@ class Notification < ActiveRecord::Base
   scope :visible , lambda { joins('LEFT JOIN topics ON notifications.topic_id = topics.id')
                             .where('topics.id IS NULL OR topics.deleted_at IS NULL') }
 
-  after_save :refresh_notification_count
-  after_destroy :refresh_notification_count
+  after_commit :send_email
+  # This is super weird because the tests fail if we don't specify `on: :destroy`
+  # TODO: Revert back to default in Rails 5 
+  after_commit :refresh_notification_count, on: :destroy
+  after_commit :refresh_notification_count, on: [:create, :update]
 
   def self.ensure_consistency!
     Notification.exec_sql("
@@ -55,9 +58,21 @@ class Notification < ActiveRecord::Base
              read: false)
       .update_all("read = 't'")
 
-    user.publish_notifications_state if count > 0
+    if count > 0
+      user.publish_notifications_state
+    end
 
     count
+  end
+
+  def self.read(user, notification_ids)
+    count = Notification.where(user_id: user.id,
+                               id: notification_ids,
+                               read: false).update_all(read: true)
+
+    if count > 0
+      user.publish_notifications_state
+    end
   end
 
   def self.interesting_after(min_date)
@@ -182,6 +197,11 @@ class Notification < ActiveRecord::Base
 
   def refresh_notification_count
     user.publish_notifications_state
+  end
+
+  def send_email
+    transaction_includes_action = self.send(:transaction_include_any_action?, [:create])
+    NotificationEmailer.process_notification(self) if transaction_includes_action
   end
 
 end

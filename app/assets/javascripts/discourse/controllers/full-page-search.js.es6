@@ -1,26 +1,29 @@
 import { ajax } from 'discourse/lib/ajax';
 import { translateResults, searchContextDescription, getSearchKey, isValidSearchTerm } from "discourse/lib/search";
-import showModal from 'discourse/lib/show-modal';
 import { default as computed, observes } from 'ember-addons/ember-computed-decorators';
 import Category from 'discourse/models/category';
 import { escapeExpression } from 'discourse/lib/utilities';
 import { setTransient } from 'discourse/lib/page-tracker';
+import { iconHTML } from 'discourse-common/helpers/fa-icon';
 
 const SortOrders = [
   {name: I18n.t('search.relevance'), id: 0},
   {name: I18n.t('search.latest_post'), id: 1, term: 'order:latest'},
   {name: I18n.t('search.most_liked'), id: 2, term: 'order:likes'},
   {name: I18n.t('search.most_viewed'), id: 3, term: 'order:views'},
+  {name: I18n.t('search.latest_topic'), id: 4, term: 'order:latest_topic'},
+
 ];
 
 export default Ember.Controller.extend({
-  needs: ["application"],
+  application: Ember.inject.controller(),
   bulkSelectEnabled: null,
 
   loading: Em.computed.not("model"),
-  queryParams: ["q", "context_id", "context", "skip_context"],
+  queryParams: ["q", "expanded", "context_id", "context", "skip_context"],
   q: null,
   selected: [],
+  expanded: false,
   context_id: null,
   context: null,
   searching: false,
@@ -72,14 +75,7 @@ export default Ember.Controller.extend({
 
   @computed('q')
   noSortQ(q) {
-    if (q) {
-      SortOrders.forEach((order) => {
-        if (q.indexOf(order.term) > -1){
-          q = q.replace(order.term, "");
-          q = q.trim();
-        }
-      });
-    }
+    q = this.cleanTerm(q);
     return escapeExpression(q);
   },
 
@@ -87,17 +83,23 @@ export default Ember.Controller.extend({
 
   setSearchTerm(term) {
     this._searchOnSortChange = false;
+    term = this.cleanTerm(term);
+    this._searchOnSortChange = true;
+    this.set('searchTerm', term);
+  },
+
+  cleanTerm(term) {
     if (term) {
       SortOrders.forEach(order => {
-        if (term.indexOf(order.term) > -1){
+        let matches = term.match(new RegExp(`${order.term}\\b`));
+        if (matches) {
           this.set('sortOrder', order.id);
-          term = term.replace(order.term, "");
+          term = term.replace(new RegExp(`${order.term}\\b`, 'g'), "");
           term = term.trim();
         }
       });
     }
-    this._searchOnSortChange = true;
-    this.set('searchTerm', term);
+    return term;
   },
 
   @observes('sortOrder')
@@ -130,7 +132,7 @@ export default Ember.Controller.extend({
 
   @observes('loading')
   _showFooter() {
-    this.set("controllers.application.showFooter", !this.get("loading"));
+    this.set("application.showFooter", !this.get("loading"));
   },
 
   @computed('hasResults')
@@ -138,9 +140,14 @@ export default Ember.Controller.extend({
     return this.currentUser && this.currentUser.staff && hasResults;
   },
 
-  @computed
-  canCreateTopic() {
-    return this.currentUser && !this.site.mobileView;
+  @computed('expanded')
+  canCreateTopic(expanded) {
+    return this.currentUser && !this.site.mobileView && !expanded;
+  },
+
+  @computed('expanded')
+  searchAdvancedIcon(expanded) {
+    return iconHTML(expanded ? "caret-down" : "caret-right");
   },
 
   _search() {
@@ -206,13 +213,12 @@ export default Ember.Controller.extend({
       this.get('selected').clear();
     },
 
-    showSearchHelp() {
-      // TODO: dupe code should be centralized
-      ajax("/static/search_help.html", { dataType: 'html' }).then(model => showModal('searchHelp', { model }));
-    },
-
     search() {
       this._search();
+    },
+
+    toggleAdvancedSearch() {
+      this.toggleProperty('expanded');
     }
   }
 });

@@ -5,13 +5,16 @@ const _loading = {};
 function loadWithTag(path, cb) {
   const head = document.getElementsByTagName('head')[0];
 
+  let finished = false;
   let s = document.createElement('script');
   s.src = path;
-  if (Ember.Test) { Ember.Test.pendingAjaxRequests++; }
+  if (Ember.Test) {
+    Ember.Test.registerWaiter(() => finished);
+  }
   head.appendChild(s);
 
   s.onload = s.onreadystatechange = function(_, abort) {
-    if (Ember.Test) { Ember.Test.pendingAjaxRequests--; }
+    finished = true;
     if (abort || !s.readyState || s.readyState === "loaded" || s.readyState === "complete") {
       s = s.onload = s.onreadystatechange = null;
       if (!abort) {
@@ -19,6 +22,10 @@ function loadWithTag(path, cb) {
       }
     }
   };
+}
+
+export function loadCSS(url) {
+  return loadScript(url, { css: true });
 }
 
 export default function loadScript(url, opts) {
@@ -44,8 +51,11 @@ export default function loadScript(url, opts) {
       delete _loading[url];
     });
 
-    const cb = function() {
+    const cb = function(data) {
       _loaded[url] = true;
+      if (opts && opts.css) {
+        $("head").append("<style>" + data + "</style>");
+      }
       done();
       resolve();
     };
@@ -63,7 +73,7 @@ export default function loadScript(url, opts) {
     if (opts.scriptTag) {
       loadWithTag(cdnUrl, cb);
     } else {
-      ajax({url: cdnUrl, dataType: "script", cache: true}).then(cb);
+      ajax({url: cdnUrl, dataType: opts.css ? "text": "script", cache: true}).then(cb);
     }
   });
 }

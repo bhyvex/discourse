@@ -3,6 +3,7 @@ require_dependency 'new_post_manager'
 
 class TopicViewSerializer < ApplicationSerializer
   include PostStreamSerializerMixin
+  include ApplicationHelper
 
   def self.attributes_from_topic(*list)
     [list].flatten.each do |attribute|
@@ -56,16 +57,18 @@ class TopicViewSerializer < ApplicationSerializer
              :chunk_size,
              :bookmarked,
              :message_archived,
-             :tags
+             :tags,
+             :featured_link,
+             :topic_status_update,
+             :unicode_title
 
   # TODO: Split off into proper object / serializer
   def details
+    topic = object.topic
+
     result = {
-      auto_close_at: object.topic.auto_close_at,
-      auto_close_hours: object.topic.auto_close_hours,
-      auto_close_based_on_last_post: object.topic.auto_close_based_on_last_post,
-      created_by: BasicUserSerializer.new(object.topic.user, scope: scope, root: false),
-      last_poster: BasicUserSerializer.new(object.topic.last_poster, scope: scope, root: false)
+      created_by: BasicUserSerializer.new(topic.user, scope: scope, root: false),
+      last_poster: BasicUserSerializer.new(topic.last_poster, scope: scope, root: false)
     }
 
     if object.topic.private_message?
@@ -114,6 +117,7 @@ class TopicViewSerializer < ApplicationSerializer
     result[:can_recover] = true if scope.can_recover_topic?(object.topic)
     result[:can_remove_allowed_users] = true if scope.can_remove_allowed_users?(object.topic)
     result[:can_invite_to] = true if scope.can_invite_to?(object.topic)
+    result[:can_invite_via_email] = true if scope.can_invite_via_email?(object.topic)
     result[:can_create_post] = true if scope.can_create?(Post, object.topic)
     result[:can_reply_as_new_topic] = true if scope.can_reply_as_new_topic?(object.topic)
     result[:can_flag_topic] = actions_summary.any? { |a| a[:can_act] }
@@ -243,8 +247,31 @@ class TopicViewSerializer < ApplicationSerializer
   def include_tags?
     SiteSetting.tagging_enabled
   end
+
+  def topic_status_update
+    TopicStatusUpdateSerializer.new(
+      object.topic.topic_status_update, root: false
+    )
+  end
+
   def tags
     object.topic.tags.map(&:name)
+  end
+
+  def include_featured_link?
+    SiteSetting.topic_featured_link_enabled
+  end
+
+  def featured_link
+    object.topic.featured_link
+  end
+
+  def include_unicode_title?
+    !!(object.topic.title =~ /:([\w\-+]*):/)
+  end
+
+  def unicode_title
+    gsub_emoji_to_unicode(object.topic.title)
   end
 
 end

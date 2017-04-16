@@ -4,10 +4,13 @@ class UploadsController < ApplicationController
 
   def create
     type = params.require(:type)
+
+    raise Discourse::InvalidAccess.new unless type =~ /^[a-z\-\_]{1,100}$/
+
     file = params[:file] || params[:files].try(:first)
     url = params[:url]
     client_id = params[:client_id]
-    synchronous = is_api? && params[:synchronous]
+    synchronous = (current_user.staff? || is_api?) && params[:synchronous]
 
     if type == "avatar"
       if SiteSetting.sso_overrides_avatar || !SiteSetting.allow_uploaded_avatars
@@ -36,8 +39,12 @@ class UploadsController < ApplicationController
       return render_404 if SiteSetting.login_required? && db == "default" && current_user.nil?
 
       if upload = Upload.find_by(sha1: params[:sha]) || Upload.find_by(id: params[:id], url: request.env["PATH_INFO"])
-        opts = { filename: upload.original_filename }
-        opts[:disposition] = 'inline' if params[:inline]
+        opts = {
+          filename: upload.original_filename,
+          content_type: Rack::Mime.mime_type(File.extname(upload.original_filename)),
+        }
+        opts[:disposition]   = "inline" if params[:inline]
+        opts[:disposition] ||= "attachment" unless FileHelper.is_image?(upload.original_filename)
         send_file(Discourse.store.path_for(upload), opts)
       else
         render_404
@@ -71,12 +78,14 @@ class UploadsController < ApplicationController
       return { errors: I18n.t("upload.file_missing") } if tempfile.nil?
 
       # convert pasted images to HQ jpegs
-      if filename == "blob.png" && SiteSetting.convert_pasted_images_to_hq_jpg
-        jpeg_path = "#{File.dirname(tempfile.path)}/blob.jpg"
-        `convert #{tempfile.path} -quality #{SiteSetting.convert_pasted_images_quality} #{jpeg_path}`
+      if filename == "image.png" && SiteSetting.convert_pasted_images_to_hq_jpg
+        jpeg_path = "#{File.dirname(tempfile.path)}/image.jpg"
+        OptimizedImage.ensure_safe_paths!(tempfile.path, jpeg_path)
+
+        Discourse::Utils.execute_command('convert', tempfile.path, '-quality', SiteSetting.convert_pasted_images_quality.to_s, jpeg_path)
         # only change the format of the image when JPG is at least 5% smaller
         if File.size(jpeg_path) < File.size(tempfile.path) * 0.95
-          filename = "blob.jpg"
+          filename = "image.jpg"
           content_type = "image/jpeg"
           tempfile = File.open(jpeg_path)
         else

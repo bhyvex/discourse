@@ -22,6 +22,9 @@ class PostAction < ActiveRecord::Base
 
   after_save :update_counters
   after_save :enforce_rules
+  after_save :create_user_action
+  after_save :update_notifications
+  after_create :create_notifications
   after_commit :notify_subscribers
 
   def disposed_by_id
@@ -157,9 +160,12 @@ SQL
 
   def self.clear_flags!(post, moderator)
     # -1 is the automatic system cleary
-    action_type_ids = moderator.id == -1 ?
-        PostActionType.auto_action_flag_types.values :
+    action_type_ids =
+      if moderator.id == Discourse::SYSTEM_USER_ID
+        PostActionType.auto_action_flag_types.values
+      else
         PostActionType.flag_types.values
+      end
 
     actions = PostAction.where(post_id: post.id)
                         .where(post_action_type_id: action_type_ids)
@@ -280,7 +286,7 @@ SQL
       post_action.recover!
       action_attrs.each { |attr, val| post_action.send("#{attr}=", val) }
       post_action.save
-      PostAlertObserver.after_create_post_action(post_action)
+      PostActionNotifier.post_action_created(post_action)
     else
       post_action = create(where_attrs.merge(action_attrs))
       if post_action && post_action.errors.count == 0
@@ -300,6 +306,19 @@ SQL
     # can happen despite being .create
     # since already bookmarked
     PostAction.where(where_attrs).first
+  end
+
+  def self.copy(original_post, target_post)
+    cols_to_copy = (column_names - %w{id post_id}).join(', ')
+
+    exec_sql <<~SQL
+    INSERT INTO post_actions(post_id, #{cols_to_copy})
+    SELECT #{target_post.id}, #{cols_to_copy}
+    FROM post_actions
+    WHERE post_id = #{original_post.id}
+    SQL
+
+    target_post.post_actions.each { |post_action| post_action.update_counters }
   end
 
   def self.remove_act(user, post, post_action_type_id)
@@ -435,8 +454,10 @@ SQL
                                          post_action_type: post_action_type_key)
     end
 
-    topic_count = Post.where(topic_id: topic_id).sum(column)
-    Topic.where(id: topic_id).update_all ["#{column} = ?", topic_count]
+    if column == "like_count"
+      topic_count = Post.where(topic_id: topic_id).sum(column)
+      Topic.where(id: topic_id).update_all ["#{column} = ?", topic_count]
+    end
 
     if PostActionType.notify_flag_type_ids.include?(post_action_type_id)
       PostAction.update_flagged_posts_count
@@ -449,6 +470,22 @@ SQL
     PostAction.auto_close_if_threshold_reached(post.topic)
     PostAction.auto_hide_if_needed(user, post, post_action_type_key)
     SpamRulesEnforcer.enforce!(post.user)
+  end
+
+  def create_user_action
+    if is_bookmark? || is_like?
+      UserActionCreator.log_post_action(self)
+    end
+  end
+
+  def update_notifications
+    if self.deleted_at.present?
+      PostActionNotifier.post_action_deleted(self)
+    end
+  end
+
+  def create_notifications
+    PostActionNotifier.post_action_created(self)
   end
 
   def notify_subscribers
@@ -466,7 +503,7 @@ SQL
                       .flags
                       .joins(:post)
                       .where("posts.topic_id = ?", topic.id)
-                      .where.not(user_id: Discourse::SYSTEM_USER_ID)
+                      .where("post_actions.user_id > 0")
                       .group("post_actions.user_id")
                       .pluck("post_actions.user_id, COUNT(post_id)")
 
@@ -476,8 +513,18 @@ SQL
     return if flags.sum { |f| f[1] } < SiteSetting.num_flags_to_close_topic
 
     # the threshold has been reached, we will close the topic waiting for intervention
-    message = I18n.t("temporarily_closed_due_to_flags")
-    topic.update_status("closed", true, Discourse.system_user, message: message)
+    topic.update_status("closed", true, Discourse.system_user,
+      message: I18n.t(
+        "temporarily_closed_due_to_flags",
+        count: SiteSetting.num_hours_to_close_topic
+      )
+    )
+
+    topic.set_or_create_status_update(
+      TopicStatusUpdate.types[:open],
+      SiteSetting.num_hours_to_close_topic,
+      by_user: Discourse.system_user
+    )
   end
 
   def self.auto_hide_if_needed(acting_user, post, post_action_type)

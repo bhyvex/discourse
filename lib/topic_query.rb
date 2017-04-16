@@ -9,30 +9,43 @@ require_dependency 'topic_query_sql'
 require_dependency 'avatar_lookup'
 
 class TopicQuery
-  VALID_OPTIONS = %i(except_topic_ids
-                     exclude_category_ids
-                     limit
-                     page
-                     per_page
-                     min_posts
-                     max_posts
-                     topic_ids
-                     visible
-                     category
-                     tags
-                     match_all_tags
-                     no_tags
-                     order
-                     ascending
-                     no_subcategories
-                     no_definitions
-                     status
-                     state
-                     search
-                     slow_platform
-                     filter
-                     group_name
-                     q)
+
+  def self.public_valid_options
+    @public_valid_options ||=
+      %i(page
+         before
+         bumped_before
+         topic_ids
+         exclude_category_ids
+         category
+         order
+         ascending
+         min_posts
+         max_posts
+         status
+         filter
+         state
+         search
+         q
+         group_name
+         tags
+         match_all_tags
+         no_subcategories
+         slow_platform
+         no_tags)
+  end
+
+  def self.valid_options
+    @valid_options ||=
+      public_valid_options +
+      %i(except_topic_ids
+         limit
+         page
+         per_page
+         visible
+         no_definitions)
+  end
+
 
   # Maps `order` to a columns in `topics`
   SORTABLE_MAPPING = {
@@ -49,8 +62,33 @@ class TopicQuery
   cattr_accessor :results_filter_callbacks
   self.results_filter_callbacks = []
 
+  attr_accessor :options, :user, :guardian
+
+  def self.add_custom_filter(key, &blk)
+    @custom_filters ||= {}
+    valid_options << key
+    public_valid_options << key
+    @custom_filters[key] = blk
+  end
+
+  def self.remove_custom_filter(key)
+    @custom_filters.delete(key)
+    public_valid_options.delete(key)
+    valid_options.delete(key)
+    @custom_filters = nil if @custom_filters.length == 0
+  end
+
+  def self.apply_custom_filters(results, topic_query)
+    if @custom_filters
+      @custom_filters.each do |key,filter|
+        results = filter.call(results, topic_query)
+      end
+    end
+    results
+  end
+
   def initialize(user=nil, options={})
-    options.assert_valid_keys(VALID_OPTIONS)
+    options.assert_valid_keys(TopicQuery.valid_options)
     @options = options.dup
     @user = user
     @guardian = Guardian.new(@user)
@@ -242,9 +280,12 @@ class TopicQuery
         .where("COALESCE(tu.notification_level, :tracking) >= :tracking", tracking: TopicUser.notification_levels[:tracking])
   end
 
-  def self.unread_filter(list)
-    list.where("tu.last_read_post_number < topics.highest_post_number")
-        .where("COALESCE(tu.notification_level, :regular) >= :tracking", regular: TopicUser.notification_levels[:regular], tracking: TopicUser.notification_levels[:tracking])
+  def self.unread_filter(list, opts)
+    col_name = opts[:staff] ? "highest_staff_post_number" : "highest_post_number"
+
+    list.where("tu.last_read_post_number < topics.#{col_name}")
+        .where("COALESCE(tu.notification_level, :regular) >= :tracking",
+               regular: TopicUser.notification_levels[:regular], tracking: TopicUser.notification_levels[:tracking])
   end
 
   def prioritize_pinned_topics(topics, options)
@@ -320,7 +361,7 @@ class TopicQuery
   end
 
   def unread_results(options={})
-    result = TopicQuery.unread_filter(default_results(options.reverse_merge(:unordered => true)))
+    result = TopicQuery.unread_filter(default_results(options.reverse_merge(:unordered => true)), staff: @user.try(:staff?))
     .order('CASE WHEN topics.user_id = tu.user_id THEN 1 ELSE 2 END')
 
     self.class.results_filter_callbacks.each do |filter_callback|
@@ -367,6 +408,18 @@ class TopicQuery
       elsif type == :user
         result = result.includes(:allowed_users)
         result = result.where("topics.id IN (SELECT topic_id FROM topic_allowed_users WHERE user_id = #{user.id.to_i})")
+      elsif type == :all
+        result = result.includes(:allowed_users)
+        result = result.where("topics.id IN (
+              SELECT topic_id
+              FROM topic_allowed_users
+              WHERE user_id = #{user.id.to_i}
+              UNION ALL
+              SELECT topic_id FROM topic_allowed_groups
+              WHERE group_id IN (
+                SELECT group_id FROM group_users WHERE user_id = #{user.id.to_i}
+              )
+      )")
       end
 
       result = result.joins("LEFT OUTER JOIN topic_users AS tu ON (topics.id = tu.topic_id AND tu.user_id = #{user.id.to_i})")
@@ -450,6 +503,15 @@ class TopicQuery
           result = result.where('categories.id = :category_id OR (categories.parent_category_id = :category_id AND categories.topic_id <> topics.id)', category_id: category_id)
         end
         result = result.references(:categories)
+
+        if !@options[:order]
+          # category default sort order
+          sort_order, sort_ascending = Category.where(id: category_id).pluck(:sort_order, :sort_ascending).first
+          if sort_order
+            options[:order] = sort_order
+            options[:ascending] = !!sort_ascending ? 'true' : 'false'
+          end
+        end
       end
 
       # ALL TAGS: something like this?
@@ -532,6 +594,19 @@ class TopicQuery
       end
 
       require_deleted_clause = true
+
+      if before = options[:before]
+        if (before = before.to_i) > 0
+          result = result.where('topics.created_at < ?', before.to_i.days.ago)
+        end
+      end
+
+      if bumped_before = options[:bumped_before]
+        if (bumped_before = bumped_before.to_i) > 0
+          result = result.where('topics.bumped_at < ?', bumped_before.to_i.days.ago)
+        end
+      end
+
       if status = options[:status]
         case status
         when 'open'
@@ -576,6 +651,8 @@ class TopicQuery
       result = result.where('topics.deleted_at IS NULL') if require_deleted_clause
       result = result.where('topics.posts_count <= ?', options[:max_posts]) if options[:max_posts].present?
       result = result.where('topics.posts_count >= ?', options[:min_posts]) if options[:min_posts].present?
+
+      result = TopicQuery.apply_custom_filters(result,self)
 
       @guardian.filter_allowed_categories(result)
     end
@@ -647,7 +724,7 @@ class TopicQuery
     end
 
     def unread_messages(params)
-      TopicQuery.unread_filter(messages_for_groups_or_user(params[:my_group_ids]))
+      TopicQuery.unread_filter(messages_for_groups_or_user(params[:my_group_ids]), staff: @user.try(:staff?))
                 .limit(params[:count])
     end
 

@@ -1,14 +1,15 @@
 import { createWidget } from 'discourse/widgets/widget';
 import { avatarFor } from 'discourse/widgets/post';
-import { iconNode } from 'discourse/helpers/fa-icon';
+import { iconNode } from 'discourse/helpers/fa-icon-node';
 import { h } from 'virtual-dom';
 import { dateNode } from 'discourse/helpers/node';
+import { userPath } from 'discourse/lib/url';
 
 export function avatarAtts(user) {
   return { template: user.avatar_template,
            username: user.username,
            post_url: user.post_url,
-           url: Discourse.getURL('/users/') + user.username_lower };
+           url: userPath(user.username_lower) };
 }
 
 createWidget('small-user-list', {
@@ -26,7 +27,11 @@ createWidget('small-user-list', {
         users = users.concat(avatarAtts(currentUser));
       }
 
-      let description = I18n.t(atts.description, { icons: '' });
+      let description = null;
+
+      if (atts.description) {
+        description = I18n.t(atts.description, { icons: '' });
+      }
 
       // oddly post_url is on the user
       let postUrl;
@@ -38,7 +43,13 @@ createWidget('small-user-list', {
       if (postUrl) {
         description = h('a', { attributes: { href: Discourse.getURL(postUrl) } }, description);
       }
-      return [icons, description, '.'];
+
+      let buffer = [icons];
+      if (description) {
+        buffer.push(description);
+        buffer.push(".");
+      }
+      return buffer;
     }
   }
 });

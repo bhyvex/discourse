@@ -42,7 +42,7 @@ export default function(options) {
 
   if (this.length === 0) return;
 
-  if (options === 'destroy') {
+  if (options === 'destroy' || options.updateData) {
     Ember.run.cancel(inputTimeout);
 
     $(this).off('keyup.autocomplete')
@@ -50,7 +50,10 @@ export default function(options) {
            .off('paste.autocomplete')
            .off('click.autocomplete');
 
-    return;
+    $(window).off('click.autocomplete');
+
+    if (options === 'destroy')
+      return;
   }
 
   if (options && options.cancel && this.data("closeAutocomplete")) {
@@ -79,7 +82,7 @@ export default function(options) {
   let prevTerm = null;
 
   // input is handled differently
-  const isInput = this[0].tagName === "INPUT";
+  const isInput = this[0].tagName === "INPUT" && !options.treatAsTextarea;
   let inputSelectedItems = [];
 
   function closeAutocomplete() {
@@ -162,28 +165,48 @@ export default function(options) {
 
   if (isInput) {
     const width = this.width();
-    wrap = this.wrap("<div class='ac-wrap clearfix" + (disabled ? " disabled": "") +  "'/>").parent();
-    wrap.width(width);
-    if(options.single) {
-      this.css("width","100%");
+
+    if (options.updateData) {
+      wrap = this.parent();
+      wrap.find('.item').remove();
+      me.show();
+    } else {
+      wrap = this.wrap("<div class='ac-wrap clearfix" + (disabled ? " disabled" : "") + "'/>").parent();
+      wrap.width(width);
+    }
+
+    if(options.single && !options.width) {
+      this.css("width", "100%");
+    } else if (options.width) {
+      this.css("width", options.width);
     } else {
       this.width(150);
     }
-    this.attr('name', this.attr('name') + "-renamed");
+
+    this.attr('name', (options.updateData) ? this.attr('name') : this.attr('name') + "-renamed");
+
     var vals = this.val().split(",");
     _.each(vals,function(x) {
       if (x !== "") {
         if (options.reverseTransform) {
           x = options.reverseTransform(x);
         }
+        if(options.single){
+          me.hide();
+        }
         addInputSelectedItem(x);
       }
     });
+
     if(options.items) {
       _.each(options.items, function(item){
+        if(options.single){
+          me.hide();
+        }
         addInputSelectedItem(item);
       });
     }
+
     this.val("");
     completeStart = 0;
     wrap.click(function() {
@@ -217,6 +240,7 @@ export default function(options) {
     var pos = null;
     var vOffset = 0;
     var hOffset = 0;
+
     if (isInput) {
       pos = {
         left: 0,
@@ -229,23 +253,33 @@ export default function(options) {
         pos: completeStart,
         key: options.key
       });
+
       hOffset = 27;
+      if (options.treatAsTextarea) vOffset = -32;
     }
     div.css({
       left: "-1000px"
     });
 
-    me.parent().append(div);
-
-    if(!isInput){
-      vOffset = div.height();
+    if (options.appendSelector) {
+      me.parents(options.appendSelector).append(div);
+    } else {
+      me.parent().append(div);
     }
 
-    if (Discourse.Site.currentProp('mobileView') && !isInput) {
-      div.css('width', 'auto');
+    if (!isInput && !options.treatAsTextarea) {
+      vOffset = div.height();
 
-      if ((me.height() / 2) >= pos.top) { vOffset = -23; }
-      if ((me.width() / 2) <= pos.left) { hOffset = -div.width(); }
+      if ((window.innerHeight - me.outerHeight() - $("header.d-header").innerHeight()) < vOffset) {
+        vOffset = -23;
+      }
+
+      if (Discourse.Site.currentProp('mobileView')) {
+        div.css('width', 'auto');
+
+        if ((me.height() / 2) >= pos.top) { vOffset = -23; }
+        if ((me.width() / 2) <= pos.left) { hOffset = -div.width(); }
+      }
     }
 
     var mePos = me.position();
@@ -308,6 +342,7 @@ export default function(options) {
     closeAutocomplete();
   });
 
+  $(window).on('click.autocomplete', () => closeAutocomplete());
   $(this).on('click.autocomplete', () => closeAutocomplete());
 
   $(this).on('paste.autocomplete', function() {

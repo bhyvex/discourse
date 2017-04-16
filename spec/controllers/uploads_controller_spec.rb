@@ -33,6 +33,20 @@ describe UploadsController do
         })
       end
 
+      it 'fails if type is invalid' do
+        xhr :post, :create, file: logo, type: "invalid type cause has space"
+        expect(response.status).to eq 403
+
+        xhr :post, :create, file: logo, type: "\\invalid"
+        expect(response.status).to eq 403
+
+        xhr :post, :create, file: logo, type: "invalid."
+        expect(response.status).to eq 403
+
+        xhr :post, :create, file: logo, type: "toolong"*100
+        expect(response.status).to eq 403
+      end
+
       it 'is successful with an image' do
         Jobs.expects(:enqueue).with(:create_thumbnails, anything)
 
@@ -61,12 +75,12 @@ describe UploadsController do
       end
 
       it 'is successful with synchronous api' do
-        SiteSetting.stubs(:authorized_extensions).returns("*")
+        SiteSetting.authorized_extensions = "*"
         controller.stubs(:is_api?).returns(true)
 
         Jobs.expects(:enqueue).with(:create_thumbnails, anything)
 
-        FakeWeb.register_uri(:get, "http://example.com/image.png", :body => File.read('spec/fixtures/images/logo.png'))
+        stub_request(:get, "http://example.com/image.png").to_return(body: File.read('spec/fixtures/images/logo.png'))
 
         xhr :post, :create, url: 'http://example.com/image.png', type: "avatar", synchronous: true
 
@@ -156,7 +170,7 @@ describe UploadsController do
       expect(response.response_code).to eq(404)
     end
 
-    it "returns 404 when the upload doens't exist" do
+    it "returns 404 when the upload doesn't exist" do
       Upload.stubs(:find_by).returns(nil)
 
       get :show, site: site, sha: sha, extension: "pdf"
@@ -171,6 +185,16 @@ describe UploadsController do
       controller.expects(:send_file)
 
       get :show, site: site, sha: sha, extension: "zip"
+    end
+
+    it "handles file without extension" do
+      SiteSetting.authorized_extensions = "*"
+      upload = Fabricate(:upload, original_filename: "image_file", sha1: sha)
+      controller.stubs(:render)
+      controller.expects(:send_file)
+
+      get :show, site: site, sha: sha
+      expect(response).to be_success
     end
 
     context "prevent anons from downloading files" do

@@ -1,5 +1,6 @@
 import { setting, propertyEqual } from 'discourse/lib/computed';
 import DiscourseURL from 'discourse/lib/url';
+import { userPath } from 'discourse/lib/url';
 
 export default Ember.Controller.extend({
   taken: false,
@@ -39,18 +40,19 @@ export default Ember.Controller.extend({
   }.property('saving'),
 
   actions: {
-    changeUsername: function() {
-      var self = this;
-      return bootbox.confirm(I18n.t("user.change_username.confirm"), I18n.t("no_value"), I18n.t("yes_value"), function(result) {
+    changeUsername() {
+      if (this.get('saveDisabled')) { return; }
+
+      return bootbox.confirm(I18n.t("user.change_username.confirm"), 
+                             I18n.t("no_value"),
+                             I18n.t("yes_value"), result => {
         if (result) {
-          self.set('saving', true);
-          self.get('content').changeUsername(self.get('newUsername')).then(function() {
-            DiscourseURL.redirectTo("/users/" + self.get('newUsername').toLowerCase() + "/preferences");
-          }, function() {
-            // error
-            self.set('error', true);
-            self.set('saving', false);
-          });
+          this.set('saving', true);
+          this.get('content').changeUsername(this.get('newUsername')).then(() => {
+            DiscourseURL.redirectTo(userPath(this.get('newUsername').toLowerCase() + "/preferences"));
+          })
+          .catch(() => this.set('error', true))
+          .finally(() => this.set('saving', false));
         }
       });
     }

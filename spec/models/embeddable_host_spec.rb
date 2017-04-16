@@ -38,6 +38,12 @@ describe EmbeddableHost do
     expect(eh.host).to eq('localhost:8080')
   end
 
+  it "supports ports for ip addresses" do
+    eh = EmbeddableHost.new(host: '192.168.0.1:3000')
+    expect(eh).to be_valid
+    expect(eh.host).to eq('192.168.0.1:3000')
+  end
+
   it "supports subdomains of localhost" do
     eh = EmbeddableHost.new(host: 'discourse.localhost')
     expect(eh).to be_valid
@@ -49,12 +55,21 @@ describe EmbeddableHost do
     expect(eh).not_to be_valid
   end
 
+  describe "it works with ports" do
+    let!(:host) { Fabricate(:embeddable_host, host: 'localhost:8000') }
+
+    it "works as expected" do
+      expect(EmbeddableHost.url_allowed?('http://localhost:8000/eviltrout')).to eq(true)
+    end
+  end
+
   describe "url_allowed?" do
     let!(:host) { Fabricate(:embeddable_host) }
 
     it 'works as expected' do
       expect(EmbeddableHost.url_allowed?('http://eviltrout.com')).to eq(true)
       expect(EmbeddableHost.url_allowed?('https://eviltrout.com')).to eq(true)
+      expect(EmbeddableHost.url_allowed?('https://eviltrout.com/انگلیسی')).to eq(true)
       expect(EmbeddableHost.url_allowed?('https://not-eviltrout.com')).to eq(false)
     end
 
@@ -66,13 +81,24 @@ describe EmbeddableHost do
   end
 
   describe "path_whitelist" do
-    let!(:host) { Fabricate(:embeddable_host, path_whitelist: '^/fp/\d{4}/\d{2}/\d{2}/.*$') }
-
     it "matches the path" do
+      Fabricate(:embeddable_host, path_whitelist: '^/fp/\d{4}/\d{2}/\d{2}/.*$')
       expect(EmbeddableHost.url_allowed?('http://eviltrout.com')).to eq(false)
       expect(EmbeddableHost.url_allowed?('http://eviltrout.com/fp/2016/08/25/test-page')).to eq(true)
     end
 
+    it "respects query parameters" do
+      Fabricate(:embeddable_host, path_whitelist: '^/fp$')
+      expect(EmbeddableHost.url_allowed?('http://eviltrout.com/fp?test=1')).to eq(false)
+      expect(EmbeddableHost.url_allowed?('http://eviltrout.com/fp')).to eq(true)
+    end
+
+    it "allows multiple records with different paths" do
+      Fabricate(:embeddable_host, path_whitelist: '/rick/.*')
+      Fabricate(:embeddable_host, path_whitelist: '/morty/.*')
+      expect(EmbeddableHost.url_allowed?('http://eviltrout.com/rick/smith')).to eq(true)
+      expect(EmbeddableHost.url_allowed?('http://eviltrout.com/morty/sanchez')).to eq(true)
+    end
   end
 
 end

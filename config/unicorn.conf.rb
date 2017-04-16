@@ -77,6 +77,11 @@ before_fork do |server, worker|
 
       Demon::Sidekiq.start(sidekiqs)
 
+      Signal.trap("SIGTSTP") do
+        STDERR.puts "#{Time.now}: Issuing stop to sidekiq"
+        Demon::Sidekiq.stop
+      end
+
       class ::Unicorn::HttpServer
         alias :master_sleep_orig :master_sleep
 
@@ -168,5 +173,10 @@ after_fork do |server, worker|
   # it may cause issues if bg threads in a v8 isolate randomly stop
   # working due to fork
   Discourse.after_fork
-  PrettyText.cook("warm up **pretty text**")
+
+  begin
+    PrettyText.cook("warm up **pretty text**")
+  rescue => e
+    Rails.logger.error("Failed to warm up pretty text: #{e}")
+  end
 end

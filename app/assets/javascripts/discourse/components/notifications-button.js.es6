@@ -1,6 +1,6 @@
 import DropdownButton from 'discourse/components/dropdown-button';
 import { allLevels, buttonDetails } from 'discourse/lib/notification-levels';
-import { iconHTML } from 'discourse/helpers/fa-icon';
+import { iconHTML } from 'discourse-common/helpers/fa-icon';
 import computed from 'ember-addons/ember-computed-decorators';
 
 export default DropdownButton.extend({
@@ -22,7 +22,7 @@ export default DropdownButton.extend({
         id: l.id,
         title: I18n.t(`${start}.title`),
         description: I18n.t(`${start}.description`),
-        styleClasses: `${l.key} fa fa-${l.icon}`
+        styleClasses: `${l.key.dasherize()} fa fa-${l.icon}`
       };
     });
   },
@@ -31,7 +31,7 @@ export default DropdownButton.extend({
   text(notificationLevel) {
     const details = buttonDetails(notificationLevel);
     const { key } = details;
-    const icon = iconHTML(details.icon, { class: key });
+    const icon = iconHTML(details.icon, { class: key.dasherize() });
 
     if (this.get('buttonIncludesText')) {
       const prefix = this.get('i18nPrefix');

@@ -38,33 +38,35 @@
   width: 95%;
 }
 
-// an ember metamorph is inserted between btn's sometimes, breaking this rule, but only on mobile for some reason:
-// .modal-footer .btn + .btn {
-.modal-footer .btn {
+// we need a little extra room on mobile for the
+// stuff inside the footer to fit
+.modal-footer {
+  padding-right: 0;
+}
+
+.modal-footer .btn + .btn {
   margin-right: 5px;
   margin-bottom: 5px;
 }
-.modal-footer .btn-group .btn + .btn {
-  margin-left: -1px;
+
+.modal-close {
+  display: inline-block;
+  float: right;
 }
 
 .modal-header {
-  // we need tighter spacing on mobile for header
-  // this clearfix under the modal title h3 pushes it way down
-  .clearfix {
-    display:none;
-  }
+  padding: 10px 0px;
+
   h3 {
+    display: inline-block;
     font-size: 1.286em;
     padding-left: 15px;
-    margin-bottom: 5px;
+    margin: 0px;
   }
 }
 .close {
-  float: right;
   font-size: 1.714em;
   padding: 10px 15px 5px 5px;
-  margin: -15px 0 0 0;
   color: $primary;
 }
 
@@ -131,6 +133,12 @@
         }
       }
     }
+  }
+
+  .disable_info_wrap .cannot_delete_reason {
+    top: -114px;
+    right: 8px;
+    min-width: 200px;
   }
 }
 

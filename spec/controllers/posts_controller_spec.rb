@@ -426,24 +426,50 @@ describe PostsController do
     include_examples 'action requires login', :put, :bookmark, post_id: 2
 
     describe 'when logged in' do
-
-      let(:post) { Fabricate(:post, user: log_in) }
+      let(:user) { log_in }
+      let(:post) { Fabricate(:post, user: user) }
+      let(:private_message) { Fabricate(:private_message_post) }
 
       it "raises an error if the user doesn't have permission to see the post" do
-        Guardian.any_instance.expects(:can_see?).with(post).returns(false).once
-
-        xhr :put, :bookmark, post_id: post.id, bookmarked: 'true'
+        post
+        xhr :put, :bookmark, post_id: private_message.id, bookmarked: 'true'
         expect(response).to be_forbidden
       end
 
       it 'creates a bookmark' do
-        PostAction.expects(:act).with(post.user, post, PostActionType.types[:bookmark])
         xhr :put, :bookmark, post_id: post.id, bookmarked: 'true'
+
+        post_action = PostAction.find_by(user:user, post: post)
+
+        expect(post_action.post_action_type_id).to eq(PostActionType.types[:bookmark])
       end
 
-      it 'removes a bookmark' do
-        PostAction.expects(:remove_act).with(post.user, post, PostActionType.types[:bookmark])
-        xhr :put, :bookmark, post_id: post.id
+      context "removing a bookmark" do
+        let(:post_action) { PostAction.act(user, post, PostActionType.types[:bookmark]) }
+        let(:admin) { Fabricate(:admin) }
+
+        it 'should be able to remove a bookmark' do
+          post_action
+          xhr :put, :bookmark, post_id: post.id
+
+          expect(PostAction.find_by(id: post_action.id)).to eq(nil)
+        end
+
+        describe "when user doesn't have permission to see bookmarked post" do
+          it "should still be able to remove a bookmark" do
+            post_action
+            post = post_action.post
+            topic = post.topic
+            topic.convert_to_private_message(admin)
+            topic.remove_allowed_user(admin, user.username)
+
+            expect(Guardian.new(user).can_see_post?(post.reload)).to eq(false)
+
+            xhr :put, :bookmark, post_id: post.id
+
+            expect(PostAction.find_by(id: post_action.id)).to eq(nil)
+          end
+        end
       end
 
     end
@@ -464,6 +490,23 @@ describe PostsController do
         xhr :put, :wiki, post_id: post.id, wiki: 'true'
 
         expect(response).to be_forbidden
+      end
+
+      it "toggle wiki status should create a new version" do
+        admin = log_in(:admin)
+        another_user = Fabricate(:user)
+        another_post = Fabricate(:post, user: another_user)
+
+        expect { xhr :put, :wiki, post_id: another_post.id, wiki: 'true' }
+          .to change { another_post.reload.version }.by(1)
+
+        expect { xhr :put, :wiki, post_id: another_post.id, wiki: 'false' }
+          .to change { another_post.reload.version }.by(-1)
+
+        another_admin = log_in(:admin)
+
+        expect { xhr :put, :wiki, post_id: another_post.id, wiki: 'true' }
+          .to change { another_post.reload.version }.by(1)
       end
 
       it "can wiki a post" do
@@ -579,34 +622,57 @@ describe PostsController do
       let(:moderator) { log_in(:moderator) }
       let(:new_post) { Fabricate.build(:post, user: user) }
 
-      it "raises an exception without a raw parameter" do
-	      expect { xhr :post, :create }.to raise_error(ActionController::ParameterMissing)
-      end
+      context "fast typing" do
+        before do
+          SiteSetting.min_first_post_typing_time = 3000
+          SiteSetting.auto_block_fast_typers_max_trust_level = 1
+        end
 
-      it 'queues the post if min_first_post_typing_time is not met' do
+        it 'queues the post if min_first_post_typing_time is not met' do
+          xhr :post, :create, {raw: 'this is the test content', title: 'this is the test title for the topic'}
 
-        SiteSetting.min_first_post_typing_time = 3000
-        # our logged on user here is tl1
-        SiteSetting.auto_block_fast_typers_max_trust_level = 1
+          expect(response).to be_success
+          parsed = ::JSON.parse(response.body)
 
-        xhr :post, :create, {raw: 'this is the test content', title: 'this is the test title for the topic'}
+          expect(parsed["action"]).to eq("enqueued")
 
-        expect(response).to be_success
-        parsed = ::JSON.parse(response.body)
+          user.reload
+          expect(user.blocked).to eq(true)
 
-        expect(parsed["action"]).to eq("enqueued")
+          qp = QueuedPost.first
 
-        user.reload
-        expect(user.blocked).to eq(true)
+          mod = Fabricate(:moderator)
+          qp.approve!(mod)
 
-        qp = QueuedPost.first
+          user.reload
+          expect(user.blocked).to eq(false)
+        end
 
-        mod = Fabricate(:moderator)
-        qp.approve!(mod)
+        it "doesn't enqueue replies when the topic is closed" do
+          topic = Fabricate(:closed_topic)
 
-        user.reload
-        expect(user.blocked).to eq(false)
+          xhr :post, :create, {
+            raw: 'this is the test content',
+            title: 'this is the test title for the topic',
+            topic_id: topic.id
+          }
 
+          expect(response).not_to be_success
+          parsed = ::JSON.parse(response.body)
+          expect(parsed["action"]).not_to eq("enqueued")
+        end
+
+        it "doesn't enqueue replies when the post is too long" do
+          SiteSetting.max_post_length = 10
+          xhr :post, :create, {
+            raw: 'this is the test content',
+            title: 'this is the test title for the topic',
+          }
+
+          expect(response).not_to be_success
+          parsed = ::JSON.parse(response.body)
+          expect(parsed["action"]).not_to eq("enqueued")
+        end
       end
 
       it 'blocks correctly based on auto_block_first_post_regex' do
@@ -744,8 +810,8 @@ describe PostsController do
         end
 
         it "passes category through" do
-          xhr :post, :create, {raw: 'hello', category: 'cool'}
-          expect(assigns(:manager_params)['category']).to eq('cool')
+          xhr :post, :create, {raw: 'hello', category: 1}
+          expect(assigns(:manager_params)['category']).to eq('1')
         end
 
         it "passes target_usernames through" do
